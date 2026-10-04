@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -21,9 +22,22 @@ const (
 	KindWhyMe           Kind = "why_me"
 )
 
+var kindOrder = []Kind{
+	KindBiodata,
+	KindStrengths,
+	KindWeaknesses,
+	KindWorkplan,
+	KindInnovations,
+	KindProposedChanges,
+	KindWhyMe,
+}
+
+func Kinds() []Kind {
+	return slices.Clone(kindOrder)
+}
+
 func ParseKind(s string) (Kind, error) {
-	switch k := Kind(s); k {
-	case KindBiodata, KindStrengths, KindWeaknesses, KindWorkplan, KindInnovations, KindProposedChanges, KindWhyMe:
+	if k := Kind(s); slices.Contains(kindOrder, k) {
 		return k, nil
 	}
 	return "", kernel.Invalid("unknown section kind %q", s)

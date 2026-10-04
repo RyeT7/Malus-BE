@@ -1,0 +1,13 @@
+name: build
+description: Set up Go and download modules
+
+runs:
+  using: composite
+
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version-file: go.mod
+
+    - shell: bash
+      run: go mod download

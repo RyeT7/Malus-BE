@@ -2,6 +2,8 @@ name: malus
 
 x-sql-dsn: &sql-dsn "server=sqlserver;port=1433;user id=sa;password=${MSSQL_SA_PASSWORD:-};database=malus_content;encrypt=true;TrustServerCertificate=true"
 
+x-cosmos-emulator-key: &cosmos-emulator-key "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw=="
+
 x-hardening: &hardening
   read_only: true
   security_opt:
@@ -40,6 +42,20 @@ services:
       timeout: 5s
       retries: 20
       start_period: 20s
+
+  cosmos:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-latest
+    restart: unless-stopped
+    environment:
+      PROTOCOL: http
+      GATEWAY_PUBLIC_ENDPOINT: cosmos
+      ENABLE_EXPLORER: "true"
+      ENABLE_TELEMETRY: "false"
+    ports:
+      - "18081:8081"
+      - "1234:1234"
+    volumes:
+      - cosmos-data:/data
 
   sqlserver-init:
     image: mcr.microsoft.com/mssql/server:2022-latest
@@ -114,6 +130,15 @@ services:
       args:
         SERVICE: interaction
     image: malus-be/interaction:local
+    environment:
+      <<: *env
+      COSMOS_ENDPOINT: http://cosmos:8081
+      COSMOS_KEY: *cosmos-emulator-key
+      COSMOS_DATABASE: malus
+      COSMOS_QUESTIONS_CONTAINER: questions
+    depends_on:
+      cosmos:
+        condition: service_started
 
   realtime:
     <<: *service
@@ -133,3 +158,4 @@ services:
 
 volumes:
   sqlserver-data:
+  cosmos-data:

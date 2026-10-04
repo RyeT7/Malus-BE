@@ -14,6 +14,7 @@ type Route struct {
 }
 
 var Routes = []Route{
+	{"GET /v1/presentation", "content", Public},
 	{"GET /v1/sections", "content", Admin},
 	{"POST /v1/sections", "content", Admin},
 	{"GET /v1/sections/{id}", "content", Admin},

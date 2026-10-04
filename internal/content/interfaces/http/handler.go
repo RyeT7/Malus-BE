@@ -17,6 +17,7 @@ func NewHandler(svc *application.Service) *Handler {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/presentation", h.presentation)
 	mux.HandleFunc("GET /v1/sections", h.list)
 	mux.HandleFunc("POST /v1/sections", h.create)
 	mux.HandleFunc("GET /v1/sections/{id}", h.get)
@@ -24,6 +25,22 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/sections/{id}/publish", h.publish)
 	mux.HandleFunc("GET /v1/sections/{id}/versions", h.versions)
 	mux.HandleFunc("POST /v1/sections/{id}/rollback", h.rollback)
+}
+
+func (h *Handler) presentation(w http.ResponseWriter, r *http.Request) {
+	view, err := h.svc.GetPresentation(r.Context())
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	etag := `"` + view.Revision + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-cache")
+	if httpx.ETagMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, toPresentationResponse(view))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

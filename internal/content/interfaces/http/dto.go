@@ -42,6 +42,32 @@ type sectionResponse struct {
 	UpdatedAt             time.Time        `json:"updatedAt"`
 }
 
+type presentationSectionResponse struct {
+	Kind        string    `json:"kind"`
+	Title       string    `json:"title"`
+	Body        string    `json:"body"`
+	Version     int       `json:"version"`
+	PublishedAt time.Time `json:"publishedAt"`
+}
+
+type presentationResponse struct {
+	Sections []presentationSectionResponse `json:"sections"`
+}
+
+func toPresentationResponse(v application.PresentationView) presentationResponse {
+	sections := make([]presentationSectionResponse, 0, len(v.Sections))
+	for _, s := range v.Sections {
+		sections = append(sections, presentationSectionResponse{
+			Kind:        s.Kind,
+			Title:       s.Title,
+			Body:        s.Body,
+			Version:     s.Version,
+			PublishedAt: s.PublishedAt,
+		})
+	}
+	return presentationResponse{Sections: sections}
+}
+
 type listResponse[T any] struct {
 	Items []T `json:"items"`
 }

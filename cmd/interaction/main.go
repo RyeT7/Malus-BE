@@ -2,7 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"os"
+	"time"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 
 	"malus-be/internal/interaction/application"
 	"malus-be/internal/interaction/infrastructure/cosmos"
@@ -19,7 +24,7 @@ func main() {
 	service.Run("interaction", serve)
 }
 
-func serve(_ context.Context, rt service.Runtime) ([]httpx.Check, error) {
+func serve(ctx context.Context, rt service.Runtime) ([]httpx.Check, error) {
 	endpoint, err := config.Required("COSMOS_ENDPOINT")
 	if err != nil {
 		return nil, err
@@ -28,10 +33,14 @@ func serve(_ context.Context, rt service.Runtime) ([]httpx.Check, error) {
 	if err != nil {
 		return nil, err
 	}
-	container, err := client.NewContainer(
-		config.String("COSMOS_DATABASE", "malus"),
-		config.String("COSMOS_QUESTIONS_CONTAINER", "questions"),
-	)
+	database := config.String("COSMOS_DATABASE", "malus")
+	questions := config.String("COSMOS_QUESTIONS_CONTAINER", "questions")
+	if rt.Config.IsLocal() {
+		if err := bootstrapLocal(ctx, client, database, questions, rt.Log); err != nil {
+			return nil, err
+		}
+	}
+	container, err := client.NewContainer(database, questions)
 	if err != nil {
 		return nil, err
 	}
@@ -43,4 +52,22 @@ func serve(_ context.Context, rt service.Runtime) ([]httpx.Check, error) {
 	svc := application.NewService(repo, bus, kernel.SystemClock)
 	interactionhttp.NewHandler(svc).Register(rt.Mux)
 	return []httpx.Check{repo.Ping}, nil
+}
+
+func bootstrapLocal(ctx context.Context, client *azcosmos.Client, database, container string, log *slog.Logger) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	for {
+		err := cosmosdb.EnsureContainer(ctx, client, database, container, cosmos.PartitionKeyPath)
+		if err == nil {
+			log.Info("cosmos container ready", "database", database, "container", container)
+			return nil
+		}
+		log.Warn("waiting for cosmos emulator", "error", err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("bootstrap cosmos: %w", err)
+		case <-time.After(3 * time.Second):
+		}
+	}
 }

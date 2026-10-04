@@ -15,7 +15,10 @@ import (
 	"malus-be/internal/platform/cosmosdb"
 )
 
-const questionsPartition = "questions"
+const (
+	PartitionKeyPath   = "/pk"
+	questionsPartition = "questions"
+)
 
 type questionDoc struct {
 	ID         string     `json:"id"`

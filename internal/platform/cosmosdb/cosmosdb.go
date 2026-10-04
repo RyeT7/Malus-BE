@@ -1,8 +1,10 @@
 package cosmosdb
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -25,6 +27,27 @@ func NewClient(endpoint, key string, allowKey bool) (*azcosmos.Client, error) {
 		return nil, fmt.Errorf("azure credential: %w", err)
 	}
 	return azcosmos.NewClient(endpoint, cred, nil)
+}
+
+func EnsureContainer(ctx context.Context, client *azcosmos.Client, database, container, partitionKeyPath string) error {
+	_, err := client.CreateDatabase(ctx, azcosmos.DatabaseProperties{ID: database}, nil)
+	if err != nil && StatusCode(err) != http.StatusConflict {
+		return fmt.Errorf("create database %s: %w", database, err)
+	}
+	db, err := client.NewDatabase(database)
+	if err != nil {
+		return err
+	}
+	_, err = db.CreateContainer(ctx, azcosmos.ContainerProperties{
+		ID: container,
+		PartitionKeyDefinition: azcosmos.PartitionKeyDefinition{
+			Paths: []string{partitionKeyPath},
+		},
+	}, nil)
+	if err != nil && StatusCode(err) != http.StatusConflict {
+		return fmt.Errorf("create container %s: %w", container, err)
+	}
+	return nil
 }
 
 func StatusCode(err error) int {

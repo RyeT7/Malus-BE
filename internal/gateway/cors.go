@@ -10,7 +10,7 @@ import (
 const (
 	corsAllowMethods  = "GET, POST, PUT, PATCH, DELETE"
 	corsAllowHeaders  = "Authorization, Content-Type, Idempotency-Key, X-Request-ID, X-Viewer-ID"
-	corsExposeHeaders = "Location, Retry-After, X-Request-ID"
+	corsExposeHeaders = "ETag, Location, Retry-After, X-Request-ID"
 )
 
 func cors(origins []string) httpx.Middleware {

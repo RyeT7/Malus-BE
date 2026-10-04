@@ -1,0 +1,135 @@
+name: malus
+
+x-sql-dsn: &sql-dsn "server=sqlserver;port=1433;user id=sa;password=${MSSQL_SA_PASSWORD:-};database=malus_content;encrypt=true;TrustServerCertificate=true"
+
+x-hardening: &hardening
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+
+x-service: &service
+  <<: *hardening
+  restart: unless-stopped
+  env_file:
+    - path: .env
+      required: false
+  environment: &env
+    APP_ENV: local
+    LOG_LEVEL: ${LOG_LEVEL:-debug}
+  healthcheck:
+    test: ["CMD", "/app", "healthcheck"]
+    interval: 10s
+    timeout: 3s
+    retries: 3
+    start_period: 5s
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}
+    ports:
+      - "14330:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    entrypoint: ["/opt/mssql-tools18/bin/sqlcmd"]
+    command:
+      - -C
+      - -S
+      - sqlserver
+      - -U
+      - sa
+      - -b
+      - -Q
+      - "IF DB_ID('malus_content') IS NULL CREATE DATABASE malus_content; IF DB_ID('malus_content_test') IS NULL CREATE DATABASE malus_content_test;"
+    environment:
+      SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:-}
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    restart: "no"
+
+  migrate-content:
+    <<: *hardening
+    build:
+      context: .
+      args:
+        SERVICE: content
+    image: malus-be/content:local
+    command: ["migrate"]
+    environment:
+      <<: *env
+      SQL_DSN: *sql-dsn
+    depends_on:
+      sqlserver-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  gateway:
+    <<: *service
+    build:
+      context: .
+      args:
+        SERVICE: gateway
+    image: malus-be/gateway:local
+    environment:
+      <<: *env
+      AUTH_DISABLED: "true"
+      CONTENT_URL: http://content:8080
+      INTERACTION_URL: http://interaction:8080
+      REALTIME_URL: http://realtime:8080
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+    ports:
+      - "8080:8080"
+
+  content:
+    <<: *service
+    build:
+      context: .
+      args:
+        SERVICE: content
+    image: malus-be/content:local
+    environment:
+      <<: *env
+      SQL_DSN: *sql-dsn
+    depends_on:
+      migrate-content:
+        condition: service_completed_successfully
+
+  interaction:
+    <<: *service
+    build:
+      context: .
+      args:
+        SERVICE: interaction
+    image: malus-be/interaction:local
+
+  realtime:
+    <<: *service
+    build:
+      context: .
+      args:
+        SERVICE: realtime
+    image: malus-be/realtime:local
+
+  worker:
+    <<: *service
+    build:
+      context: .
+      args:
+        SERVICE: worker
+    image: malus-be/worker:local
+
+volumes:
+  sqlserver-data:

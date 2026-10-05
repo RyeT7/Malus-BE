@@ -101,7 +101,7 @@ services:
     image: malus-be/gateway:local
     environment:
       <<: *env
-      AUTH_DISABLED: "true"
+      AUTH_DISABLED: ${AUTH_DISABLED:-true}
       CONTENT_URL: http://content:8080
       INTERACTION_URL: http://interaction:8080
       REALTIME_URL: http://realtime:8080

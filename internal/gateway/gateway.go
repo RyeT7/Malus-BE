@@ -22,6 +22,7 @@ func New(cfg Config, authn Authenticator, log *slog.Logger) (http.Handler, error
 		}
 		mux.Handle(route.Pattern, authorize(route.Access, authn, cfg.Auth.AdminRole, proxy))
 	}
+	mux.Handle("GET /v1/me", me(authn, cfg.Auth.AdminRole))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		httpx.Problem(w, r, http.StatusNotFound, "Not Found", "")
 	})

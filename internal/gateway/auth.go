@@ -12,6 +12,7 @@ import (
 
 type Identity struct {
 	Subject string
+	Name    string
 	Roles   []string
 }
 
@@ -46,7 +47,11 @@ func (a *JWTAuthenticator) Authenticate(r *http.Request) (Identity, error) {
 	if subject == "" {
 		subject = claims.Subject
 	}
-	return Identity{Subject: subject, Roles: claims.Roles}, nil
+	name := claims.Name
+	if name == "" {
+		name = claims.Username
+	}
+	return Identity{Subject: subject, Name: name, Roles: claims.Roles}, nil
 }
 
 type DevAuthenticator struct {
@@ -54,7 +59,7 @@ type DevAuthenticator struct {
 }
 
 func NewDevAuthenticator(adminRole string) *DevAuthenticator {
-	return &DevAuthenticator{identity: Identity{Subject: "local-dev", Roles: []string{adminRole}}}
+	return &DevAuthenticator{identity: Identity{Subject: "local-dev", Name: "Local developer", Roles: []string{adminRole}}}
 }
 
 func (a *DevAuthenticator) Authenticate(*http.Request) (Identity, error) {

@@ -59,6 +59,8 @@ type Claims struct {
 	ExpiresAt float64  `json:"exp"`
 	NotBefore float64  `json:"nbf"`
 	Roles     []string `json:"roles"`
+	Name      string   `json:"name"`
+	Username  string   `json:"preferred_username"`
 }
 
 func (v *Verifier) Verify(ctx context.Context, token string) (Claims, error) {

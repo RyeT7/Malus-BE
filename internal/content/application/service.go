@@ -61,14 +61,15 @@ func (s *Service) CreateSection(ctx context.Context, cmd CreateSection) (Section
 	if err := s.commit(ctx, section); err != nil {
 		return SectionView{}, err
 	}
-	return toSectionView(section), nil
+	return s.GetSection(ctx, section.ID())
 }
 
 type EditDraft struct {
-	ID    kernel.ID
-	Title string
-	Body  string
-	Items []ItemInput
+	ID               kernel.ID
+	ExpectedRevision int64
+	Title            string
+	Body             string
+	Items            []ItemInput
 }
 
 func (s *Service) EditDraft(ctx context.Context, cmd EditDraft) (SectionView, error) {
@@ -76,45 +77,43 @@ func (s *Service) EditDraft(ctx context.Context, cmd EditDraft) (SectionView, er
 	if err != nil {
 		return SectionView{}, err
 	}
-	section, err := s.repo.Get(ctx, cmd.ID)
-	if err != nil {
-		return SectionView{}, err
-	}
-	if err := section.EditDraft(content, s.now()); err != nil {
-		return SectionView{}, err
-	}
-	if err := s.commit(ctx, section); err != nil {
-		return SectionView{}, err
-	}
-	return toSectionView(section), nil
+	return s.change(ctx, cmd.ID, cmd.ExpectedRevision, func(section *domain.Section) error {
+		return section.EditDraft(content, s.now())
+	})
 }
 
-func (s *Service) Publish(ctx context.Context, id kernel.ID) (SectionView, error) {
+func (s *Service) Publish(ctx context.Context, id kernel.ID, expectedRevision int64) (SectionView, error) {
+	return s.change(ctx, id, expectedRevision, func(section *domain.Section) error {
+		_, err := section.Publish(s.now())
+		return err
+	})
+}
+
+func (s *Service) Rollback(ctx context.Context, id kernel.ID, version int, expectedRevision int64) (SectionView, error) {
+	return s.change(ctx, id, expectedRevision, func(section *domain.Section) error {
+		_, err := section.Rollback(version, s.now())
+		return err
+	})
+}
+
+func (s *Service) change(ctx context.Context, id kernel.ID, expectedRevision int64, apply func(*domain.Section) error) (SectionView, error) {
 	section, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return SectionView{}, err
 	}
-	if _, err := section.Publish(s.now()); err != nil {
+	if section.Revision() != expectedRevision {
+		return SectionView{}, kernel.ErrPrecondition
+	}
+	if err := apply(section); err != nil {
 		return SectionView{}, err
 	}
 	if err := s.commit(ctx, section); err != nil {
+		if errors.Is(err, kernel.ErrConcurrentUpdate) {
+			return SectionView{}, kernel.ErrPrecondition
+		}
 		return SectionView{}, err
 	}
-	return toSectionView(section), nil
-}
-
-func (s *Service) Rollback(ctx context.Context, id kernel.ID, version int) (SectionView, error) {
-	section, err := s.repo.Get(ctx, id)
-	if err != nil {
-		return SectionView{}, err
-	}
-	if _, err := section.Rollback(version, s.now()); err != nil {
-		return SectionView{}, err
-	}
-	if err := s.commit(ctx, section); err != nil {
-		return SectionView{}, err
-	}
-	return toSectionView(section), nil
+	return s.GetSection(ctx, id)
 }
 
 func (s *Service) GetSection(ctx context.Context, id kernel.ID) (SectionView, error) {

@@ -78,6 +78,7 @@ func (s *Section) Kind() Kind           { return s.kind }
 func (s *Section) Draft() Content       { return s.draft.clone() }
 func (s *Section) CreatedAt() time.Time { return s.createdAt }
 func (s *Section) UpdatedAt() time.Time { return s.updatedAt }
+func (s *Section) Revision() int64      { return s.revision }
 
 func (s *Section) Versions() []Version {
 	versions := make([]Version, len(s.versions))

@@ -30,6 +30,7 @@ type SectionView struct {
 	Draft                 ContentView
 	Published             *VersionView
 	HasUnpublishedChanges bool
+	Revision              int64
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 }
@@ -56,6 +57,7 @@ func toSectionView(s *domain.Section) SectionView {
 		Kind:                  string(s.Kind()),
 		Draft:                 toContentView(s.Draft()),
 		HasUnpublishedChanges: s.HasUnpublishedChanges(),
+		Revision:              s.Revision(),
 		CreatedAt:             s.CreatedAt(),
 		UpdatedAt:             s.UpdatedAt(),
 	}

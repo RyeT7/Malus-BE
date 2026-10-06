@@ -24,7 +24,7 @@ func create(t *testing.T, svc *Service, kind, title, body string, publish bool, 
 		t.Fatalf("create %s: %v", kind, err)
 	}
 	if publish {
-		if view, err = svc.Publish(ctx, kernel.ID(view.ID)); err != nil {
+		if view, err = svc.Publish(ctx, kernel.ID(view.ID), view.Revision); err != nil {
 			t.Fatalf("publish %s: %v", kind, err)
 		}
 	}
@@ -39,7 +39,7 @@ func TestPresentationShowsOnlyPublishedContentInCanonicalOrder(t *testing.T) {
 	create(t, svc, "workplan", "Workplan", "never published", false)
 	create(t, svc, "biodata", "About me", "hello", true, ItemInput{Heading: "Name", Detail: "Ryuu"})
 
-	if _, err := svc.EditDraft(ctx, EditDraft{ID: kernel.ID(whyMe.ID), Title: "Why me", Body: "unpublished edit"}); err != nil {
+	if _, err := svc.EditDraft(ctx, EditDraft{ID: kernel.ID(whyMe.ID), ExpectedRevision: whyMe.Revision, Title: "Why me", Body: "unpublished edit"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -72,7 +72,8 @@ func TestPresentationRevisionChangesOnlyWhenPublishedContentChanges(t *testing.T
 		t.Fatal(err)
 	}
 
-	if _, err := svc.EditDraft(ctx, EditDraft{ID: kernel.ID(bio.ID), Title: "About me", Body: "v2", Items: []ItemInput{name}}); err != nil {
+	edited, err := svc.EditDraft(ctx, EditDraft{ID: kernel.ID(bio.ID), ExpectedRevision: bio.Revision, Title: "About me", Body: "v2", Items: []ItemInput{name}})
+	if err != nil {
 		t.Fatal(err)
 	}
 	afterDraft, _ := svc.GetPresentation(ctx)
@@ -80,7 +81,7 @@ func TestPresentationRevisionChangesOnlyWhenPublishedContentChanges(t *testing.T
 		t.Fatal("revision changed although only the draft changed")
 	}
 
-	if _, err := svc.Publish(ctx, kernel.ID(bio.ID)); err != nil {
+	if _, err := svc.Publish(ctx, kernel.ID(bio.ID), edited.Revision); err != nil {
 		t.Fatal(err)
 	}
 	afterPublish, _ := svc.GetPresentation(ctx)

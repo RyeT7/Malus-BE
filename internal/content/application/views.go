@@ -6,9 +6,16 @@ import (
 	"malus-be/internal/content/domain"
 )
 
+type ItemView struct {
+	Heading  string
+	Detail   string
+	Semester int
+}
+
 type ContentView struct {
 	Title string
 	Body  string
+	Items []ItemView
 }
 
 type VersionView struct {
@@ -27,8 +34,16 @@ type SectionView struct {
 	UpdatedAt             time.Time
 }
 
+func toItemViews(items []domain.Item) []ItemView {
+	views := make([]ItemView, len(items))
+	for i, item := range items {
+		views[i] = ItemView{Heading: item.Heading, Detail: item.Detail, Semester: item.Semester}
+	}
+	return views
+}
+
 func toContentView(c domain.Content) ContentView {
-	return ContentView{Title: c.Title, Body: c.Body}
+	return ContentView{Title: c.Title, Body: c.Body, Items: toItemViews(c.Items)}
 }
 
 func toVersionView(v domain.Version) VersionView {

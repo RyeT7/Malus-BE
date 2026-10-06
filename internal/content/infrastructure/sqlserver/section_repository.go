@@ -21,7 +21,7 @@ func NewSectionRepository(db *sql.DB) *SectionRepository {
 }
 
 const selectSections = `
-SELECT id, kind, draft_title, draft_body, created_at, updated_at, revision
+SELECT id, kind, draft_title, draft_body, draft_items, created_at, updated_at, revision
 FROM dbo.sections`
 
 func (r *SectionRepository) Get(ctx context.Context, id kernel.ID) (*domain.Section, error) {
@@ -52,6 +52,10 @@ func (r *SectionRepository) List(ctx context.Context) ([]*domain.Section, error)
 
 func (r *SectionRepository) Save(ctx context.Context, s *domain.Section) error {
 	snap := s.Snapshot()
+	draftItems, err := encodeItems(snap.Draft.Items)
+	if err != nil {
+		return err
+	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -61,12 +65,13 @@ func (r *SectionRepository) Save(ctx context.Context, s *domain.Section) error {
 
 	if snap.Revision == 0 {
 		_, err := tx.ExecContext(ctx, `
-INSERT INTO dbo.sections (id, kind, draft_title, draft_body, created_at, updated_at, revision)
-VALUES (@id, @kind, @title, @body, @created_at, @updated_at, 1)`,
+INSERT INTO dbo.sections (id, kind, draft_title, draft_body, draft_items, created_at, updated_at, revision)
+VALUES (@id, @kind, @title, @body, @items, @created_at, @updated_at, 1)`,
 			sql.Named("id", snap.ID.String()),
 			sql.Named("kind", string(snap.Kind)),
 			sql.Named("title", snap.Draft.Title),
 			sql.Named("body", snap.Draft.Body),
+			sql.Named("items", draftItems),
 			sql.Named("created_at", snap.CreatedAt),
 			sql.Named("updated_at", snap.UpdatedAt),
 		)
@@ -79,11 +84,12 @@ VALUES (@id, @kind, @title, @body, @created_at, @updated_at, 1)`,
 	} else {
 		res, err := tx.ExecContext(ctx, `
 UPDATE dbo.sections
-SET draft_title = @title, draft_body = @body, updated_at = @updated_at, revision = revision + 1
+SET draft_title = @title, draft_body = @body, draft_items = @items, updated_at = @updated_at, revision = revision + 1
 WHERE id = @id AND revision = @revision`,
 			sql.Named("id", snap.ID.String()),
 			sql.Named("title", snap.Draft.Title),
 			sql.Named("body", snap.Draft.Body),
+			sql.Named("items", draftItems),
 			sql.Named("updated_at", snap.UpdatedAt),
 			sql.Named("revision", snap.Revision),
 		)
@@ -108,13 +114,18 @@ WHERE id = @id AND revision = @revision`,
 		if v.Number <= stored {
 			continue
 		}
+		versionItems, err := encodeItems(v.Content.Items)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO dbo.section_versions (section_id, number, title, body, published_at)
-VALUES (@id, @number, @title, @body, @published_at)`,
+INSERT INTO dbo.section_versions (section_id, number, title, body, items, published_at)
+VALUES (@id, @number, @title, @body, @items, @published_at)`,
 			sql.Named("id", snap.ID.String()),
 			sql.Named("number", v.Number),
 			sql.Named("title", v.Content.Title),
 			sql.Named("body", v.Content.Body),
+			sql.Named("items", versionItems),
 			sql.Named("published_at", v.PublishedAt),
 		); err != nil {
 			return fmt.Errorf("insert version %d: %w", v.Number, err)
@@ -136,10 +147,13 @@ func (r *SectionRepository) load(ctx context.Context, query string, args ...any)
 	for rows.Next() {
 		var (
 			snap               domain.Snapshot
-			id, kind           string
+			id, kind, items    string
 			createdAt, updated time.Time
 		)
-		if err := rows.Scan(&id, &kind, &snap.Draft.Title, &snap.Draft.Body, &createdAt, &updated, &snap.Revision); err != nil {
+		if err := rows.Scan(&id, &kind, &snap.Draft.Title, &snap.Draft.Body, &items, &createdAt, &updated, &snap.Revision); err != nil {
+			return nil, err
+		}
+		if snap.Draft.Items, err = decodeItems(items); err != nil {
 			return nil, err
 		}
 		id = strings.TrimSpace(id)
@@ -178,7 +192,7 @@ func (r *SectionRepository) loadVersions(ctx context.Context, snaps []domain.Sna
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-SELECT section_id, number, title, body, published_at
+SELECT section_id, number, title, body, items, published_at
 FROM dbo.section_versions
 WHERE section_id IN (`+strings.Join(placeholders, ", ")+`)
 ORDER BY section_id, number`, args...)
@@ -189,10 +203,13 @@ ORDER BY section_id, number`, args...)
 
 	for rows.Next() {
 		var (
-			sectionID string
-			v         domain.Version
+			sectionID, items string
+			v                domain.Version
 		)
-		if err := rows.Scan(&sectionID, &v.Number, &v.Content.Title, &v.Content.Body, &v.PublishedAt); err != nil {
+		if err := rows.Scan(&sectionID, &v.Number, &v.Content.Title, &v.Content.Body, &items, &v.PublishedAt); err != nil {
+			return err
+		}
+		if v.Content.Items, err = decodeItems(items); err != nil {
 			return err
 		}
 		v.PublishedAt = v.PublishedAt.UTC()

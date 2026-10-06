@@ -56,13 +56,37 @@ func databaseName(dsn string) string {
 	return ""
 }
 
+func mustSection(t *testing.T, kind domain.Kind, title, body string, now time.Time, items ...domain.Item) *domain.Section {
+	t.Helper()
+	content, err := domain.NewContent(title, body, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := domain.NewSection(kind, content, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func mustEdit(t *testing.T, s *domain.Section, title, body string, now time.Time, items ...domain.Item) {
+	t.Helper()
+	content, err := domain.NewContent(title, body, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EditDraft(content, now); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSectionRepositoryRoundTrip(t *testing.T) {
 	repo := NewSectionRepository(openTestDB(t))
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	content, _ := domain.NewContent("About me", "first")
-	s := domain.NewSection(domain.KindBiodata, content, now)
+	name := domain.Item{Heading: "Name", Detail: "Ryuu"}
+	s := mustSection(t, domain.KindBiodata, "About me", "first", now, name)
 	if _, err := s.Publish(now); err != nil {
 		t.Fatal(err)
 	}
@@ -74,8 +98,8 @@ func TestSectionRepositoryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	edited, _ := domain.NewContent("About me", "second")
-	loaded.EditDraft(edited, now)
+	major := domain.Item{Heading: "Major", Detail: "Computer Science"}
+	mustEdit(t, loaded, "About me", "second", now, name, major)
 	if _, err := loaded.Publish(now); err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +111,15 @@ func TestSectionRepositoryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find by kind: %v", err)
 	}
-	if v := got.Versions(); len(v) != 2 || v[1].Content.Body != "second" || got.Draft().Body != "second" {
+	v := got.Versions()
+	if len(v) != 2 || v[1].Content.Body != "second" || got.Draft().Body != "second" {
 		t.Fatalf("unexpected section after reload: draft=%q versions=%+v", got.Draft().Body, v)
+	}
+	if len(v[0].Content.Items) != 1 || len(v[1].Content.Items) != 2 || v[1].Content.Items[1] != major {
+		t.Fatalf("version items not persisted: v1=%+v v2=%+v", v[0].Content.Items, v[1].Content.Items)
+	}
+	if items := got.Draft().Items; len(items) != 2 || items[0] != name {
+		t.Fatalf("draft items not persisted: %+v", items)
 	}
 
 	all, err := repo.List(ctx)
@@ -97,26 +128,45 @@ func TestSectionRepositoryRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSectionRepositoryPersistsWorkplanSemesters(t *testing.T) {
+	repo := NewSectionRepository(openTestDB(t))
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	s := mustSection(t, domain.KindWorkplan, "Workplan", "", now,
+		domain.Item{Heading: "Onboarding", Detail: "Meet the team", Semester: 1},
+		domain.Item{Heading: "Review", Semester: 2},
+	)
+	if err := repo.Save(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.Get(ctx, s.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := got.Draft().Items
+	if len(items) != 2 || items[0].Semester != 1 || items[1].Semester != 2 || items[1].Detail != "" {
+		t.Fatalf("unexpected workplan items: %+v", items)
+	}
+}
+
 func TestSectionRepositoryDetectsConcurrentUpdate(t *testing.T) {
 	repo := NewSectionRepository(openTestDB(t))
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	content, _ := domain.NewContent("Plan", "v1")
-	if err := repo.Save(ctx, domain.NewSection(domain.KindWorkplan, content, now)); err != nil {
+	if err := repo.Save(ctx, mustSection(t, domain.KindWorkplan, "Plan", "v1", now)); err != nil {
 		t.Fatal(err)
 	}
 	first, _ := repo.FindByKind(ctx, domain.KindWorkplan)
 	second, _ := repo.FindByKind(ctx, domain.KindWorkplan)
 
-	a, _ := domain.NewContent("Plan", "from tab A")
-	first.EditDraft(a, now)
+	mustEdit(t, first, "Plan", "from tab A", now)
 	if err := repo.Save(ctx, first); err != nil {
 		t.Fatalf("first writer: %v", err)
 	}
 
-	b, _ := domain.NewContent("Plan", "from tab B")
-	second.EditDraft(b, now)
+	mustEdit(t, second, "Plan", "from tab B", now)
 	if err := repo.Save(ctx, second); !errors.Is(err, kernel.ErrConcurrentUpdate) {
 		t.Fatalf("second writer: want ErrConcurrentUpdate, got %v", err)
 	}
@@ -127,11 +177,10 @@ func TestSectionRepositoryEnforcesUniqueKind(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	content, _ := domain.NewContent("Why", "x")
-	if err := repo.Save(ctx, domain.NewSection(domain.KindWhyMe, content, now)); err != nil {
+	if err := repo.Save(ctx, mustSection(t, domain.KindWhyMe, "Why", "x", now)); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Save(ctx, domain.NewSection(domain.KindWhyMe, content, now)); !errors.Is(err, kernel.ErrConflict) {
+	if err := repo.Save(ctx, mustSection(t, domain.KindWhyMe, "Why", "x", now)); !errors.Is(err, kernel.ErrConflict) {
 		t.Fatalf("want ErrConflict for duplicate kind, got %v", err)
 	}
 }

@@ -58,7 +58,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, r, err)
 		return
 	}
-	view, err := h.svc.CreateSection(r.Context(), application.CreateSection{Kind: req.Kind, Title: req.Title, Body: req.Body})
+	view, err := h.svc.CreateSection(r.Context(), application.CreateSection{Kind: req.Kind, Title: req.Title, Body: req.Body, Items: toItemInputs(req.Items)})
 	if err != nil {
 		httpx.Error(w, r, err)
 		return
@@ -82,7 +82,7 @@ func (h *Handler) editDraft(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, r, err)
 		return
 	}
-	view, err := h.svc.EditDraft(r.Context(), application.EditDraft{ID: kernel.ID(r.PathValue("id")), Title: req.Title, Body: req.Body})
+	view, err := h.svc.EditDraft(r.Context(), application.EditDraft{ID: kernel.ID(r.PathValue("id")), Title: req.Title, Body: req.Body, Items: toItemInputs(req.Items)})
 	if err != nil {
 		httpx.Error(w, r, err)
 		return

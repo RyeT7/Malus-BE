@@ -3,9 +3,7 @@ package domain
 import (
 	"context"
 	"slices"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"malus-be/internal/kernel"
 )
@@ -43,30 +41,6 @@ func ParseKind(s string) (Kind, error) {
 	return "", kernel.Invalid("unknown section kind %q", s)
 }
 
-const (
-	maxTitleRunes = 200
-	maxBodyRunes  = 20000
-)
-
-type Content struct {
-	Title string
-	Body  string
-}
-
-func NewContent(title, body string) (Content, error) {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return Content{}, kernel.Invalid("title is required")
-	}
-	if utf8.RuneCountInString(title) > maxTitleRunes {
-		return Content{}, kernel.Invalid("title exceeds %d characters", maxTitleRunes)
-	}
-	if utf8.RuneCountInString(body) > maxBodyRunes {
-		return Content{}, kernel.Invalid("body exceeds %d characters", maxBodyRunes)
-	}
-	return Content{Title: title, Body: body}, nil
-}
-
 type Version struct {
 	Number      int
 	Content     Content
@@ -84,54 +58,71 @@ type Section struct {
 	revision  int64
 }
 
-func NewSection(kind Kind, draft Content, now time.Time) *Section {
+func NewSection(kind Kind, draft Content, now time.Time) (*Section, error) {
+	if err := kind.checkDraft(draft); err != nil {
+		return nil, err
+	}
 	s := &Section{
 		id:        kernel.NewID(),
 		kind:      kind,
-		draft:     draft,
+		draft:     draft.clone(),
 		createdAt: now,
 		updatedAt: now,
 	}
 	s.Record(SectionCreated{EventBase: kernel.NewEventBase(s.id, now), Kind: kind})
-	return s
+	return s, nil
 }
 
 func (s *Section) ID() kernel.ID        { return s.id }
 func (s *Section) Kind() Kind           { return s.kind }
-func (s *Section) Draft() Content       { return s.draft }
+func (s *Section) Draft() Content       { return s.draft.clone() }
 func (s *Section) CreatedAt() time.Time { return s.createdAt }
 func (s *Section) UpdatedAt() time.Time { return s.updatedAt }
 
 func (s *Section) Versions() []Version {
-	return append([]Version(nil), s.versions...)
+	versions := make([]Version, len(s.versions))
+	for i, v := range s.versions {
+		v.Content = v.Content.clone()
+		versions[i] = v
+	}
+	return versions
 }
 
 func (s *Section) Published() (Version, bool) {
 	if len(s.versions) == 0 {
 		return Version{}, false
 	}
-	return s.versions[len(s.versions)-1], true
+	v := s.versions[len(s.versions)-1]
+	v.Content = v.Content.clone()
+	return v, true
 }
 
 func (s *Section) HasUnpublishedChanges() bool {
 	p, ok := s.Published()
-	return !ok || p.Content != s.draft
+	return !ok || !p.Content.Equal(s.draft)
 }
 
-func (s *Section) EditDraft(c Content, now time.Time) {
-	if c == s.draft {
-		return
+func (s *Section) EditDraft(c Content, now time.Time) error {
+	if err := s.kind.checkDraft(c); err != nil {
+		return err
 	}
-	s.draft = c
+	if c.Equal(s.draft) {
+		return nil
+	}
+	s.draft = c.clone()
 	s.updatedAt = now
 	s.Record(DraftEdited{EventBase: kernel.NewEventBase(s.id, now)})
+	return nil
 }
 
 func (s *Section) Publish(now time.Time) (Version, error) {
 	if !s.HasUnpublishedChanges() {
 		return Version{}, kernel.Conflict("section %s has no unpublished changes", s.id)
 	}
-	v := Version{Number: len(s.versions) + 1, Content: s.draft, PublishedAt: now}
+	if err := s.kind.checkPublishable(s.draft); err != nil {
+		return Version{}, err
+	}
+	v := Version{Number: len(s.versions) + 1, Content: s.draft.clone(), PublishedAt: now}
 	s.versions = append(s.versions, v)
 	s.updatedAt = now
 	s.Record(SectionPublished{EventBase: kernel.NewEventBase(s.id, now), Version: v.Number})
@@ -143,7 +134,7 @@ func (s *Section) Rollback(number int, now time.Time) (Version, error) {
 		return Version{}, kernel.NotFound("section %s has no version %d", s.id, number)
 	}
 	previous := s.draft
-	s.draft = s.versions[number-1].Content
+	s.draft = s.versions[number-1].Content.clone()
 	v, err := s.Publish(now)
 	if err != nil {
 		s.draft = previous
@@ -167,7 +158,7 @@ func (s *Section) Snapshot() Snapshot {
 	return Snapshot{
 		ID:        s.id,
 		Kind:      s.kind,
-		Draft:     s.draft,
+		Draft:     s.draft.clone(),
 		Versions:  s.Versions(),
 		CreatedAt: s.createdAt,
 		UpdatedAt: s.updatedAt,
@@ -179,12 +170,21 @@ func Restore(snap Snapshot) *Section {
 	return &Section{
 		id:        snap.ID,
 		kind:      snap.Kind,
-		draft:     snap.Draft,
-		versions:  append([]Version(nil), snap.Versions...),
+		draft:     snap.Draft.clone(),
+		versions:  restoreVersions(snap.Versions),
 		createdAt: snap.CreatedAt,
 		updatedAt: snap.UpdatedAt,
 		revision:  snap.Revision,
 	}
+}
+
+func restoreVersions(versions []Version) []Version {
+	restored := make([]Version, len(versions))
+	for i, v := range versions {
+		v.Content = v.Content.clone()
+		restored[i] = v
+	}
+	return restored
 }
 
 type Repository interface {

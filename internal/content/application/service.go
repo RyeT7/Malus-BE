@@ -18,10 +18,25 @@ func NewService(repo domain.Repository, events kernel.EventPublisher, now kernel
 	return &Service{repo: repo, events: events, now: now}
 }
 
+type ItemInput struct {
+	Heading  string
+	Detail   string
+	Semester int
+}
+
+func toItems(inputs []ItemInput) []domain.Item {
+	items := make([]domain.Item, len(inputs))
+	for i, in := range inputs {
+		items[i] = domain.Item{Heading: in.Heading, Detail: in.Detail, Semester: in.Semester}
+	}
+	return items
+}
+
 type CreateSection struct {
 	Kind  string
 	Title string
 	Body  string
+	Items []ItemInput
 }
 
 func (s *Service) CreateSection(ctx context.Context, cmd CreateSection) (SectionView, error) {
@@ -29,7 +44,7 @@ func (s *Service) CreateSection(ctx context.Context, cmd CreateSection) (Section
 	if err != nil {
 		return SectionView{}, err
 	}
-	content, err := domain.NewContent(cmd.Title, cmd.Body)
+	content, err := domain.NewContent(cmd.Title, cmd.Body, toItems(cmd.Items))
 	if err != nil {
 		return SectionView{}, err
 	}
@@ -39,7 +54,10 @@ func (s *Service) CreateSection(ctx context.Context, cmd CreateSection) (Section
 		return SectionView{}, err
 	}
 
-	section := domain.NewSection(kind, content, s.now())
+	section, err := domain.NewSection(kind, content, s.now())
+	if err != nil {
+		return SectionView{}, err
+	}
 	if err := s.commit(ctx, section); err != nil {
 		return SectionView{}, err
 	}
@@ -50,10 +68,11 @@ type EditDraft struct {
 	ID    kernel.ID
 	Title string
 	Body  string
+	Items []ItemInput
 }
 
 func (s *Service) EditDraft(ctx context.Context, cmd EditDraft) (SectionView, error) {
-	content, err := domain.NewContent(cmd.Title, cmd.Body)
+	content, err := domain.NewContent(cmd.Title, cmd.Body, toItems(cmd.Items))
 	if err != nil {
 		return SectionView{}, err
 	}
@@ -61,7 +80,9 @@ func (s *Service) EditDraft(ctx context.Context, cmd EditDraft) (SectionView, er
 	if err != nil {
 		return SectionView{}, err
 	}
-	section.EditDraft(content, s.now())
+	if err := section.EditDraft(content, s.now()); err != nil {
+		return SectionView{}, err
+	}
 	if err := s.commit(ctx, section); err != nil {
 		return SectionView{}, err
 	}

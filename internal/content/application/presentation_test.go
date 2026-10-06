@@ -16,10 +16,10 @@ func newTestService(t *testing.T) *Service {
 	return NewService(memory.NewSectionRepository(), messaging.NewMemoryBus("/test"), func() time.Time { return now })
 }
 
-func create(t *testing.T, svc *Service, kind, title, body string, publish bool) SectionView {
+func create(t *testing.T, svc *Service, kind, title, body string, publish bool, items ...ItemInput) SectionView {
 	t.Helper()
 	ctx := context.Background()
-	view, err := svc.CreateSection(ctx, CreateSection{Kind: kind, Title: title, Body: body})
+	view, err := svc.CreateSection(ctx, CreateSection{Kind: kind, Title: title, Body: body, Items: items})
 	if err != nil {
 		t.Fatalf("create %s: %v", kind, err)
 	}
@@ -37,7 +37,7 @@ func TestPresentationShowsOnlyPublishedContentInCanonicalOrder(t *testing.T) {
 
 	whyMe := create(t, svc, "why_me", "Why me", "published body", true)
 	create(t, svc, "workplan", "Workplan", "never published", false)
-	create(t, svc, "biodata", "About me", "hello", true)
+	create(t, svc, "biodata", "About me", "hello", true, ItemInput{Heading: "Name", Detail: "Ryuu"})
 
 	if _, err := svc.EditDraft(ctx, EditDraft{ID: kernel.ID(whyMe.ID), Title: "Why me", Body: "unpublished edit"}); err != nil {
 		t.Fatal(err)
@@ -56,19 +56,23 @@ func TestPresentationShowsOnlyPublishedContentInCanonicalOrder(t *testing.T) {
 	if got.Sections[1].Body != "published body" || got.Sections[1].Version != 1 {
 		t.Fatalf("draft leaked into presentation: %+v", got.Sections[1])
 	}
+	if items := got.Sections[0].Items; len(items) != 1 || items[0].Heading != "Name" || items[0].Detail != "Ryuu" {
+		t.Fatalf("want biodata items in presentation, got %+v", items)
+	}
 }
 
 func TestPresentationRevisionChangesOnlyWhenPublishedContentChanges(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	bio := create(t, svc, "biodata", "About me", "v1", true)
+	name := ItemInput{Heading: "Name", Detail: "Ryuu"}
+	bio := create(t, svc, "biodata", "About me", "v1", true, name)
 	first, err := svc.GetPresentation(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := svc.EditDraft(ctx, EditDraft{ID: kernel.ID(bio.ID), Title: "About me", Body: "v2"}); err != nil {
+	if _, err := svc.EditDraft(ctx, EditDraft{ID: kernel.ID(bio.ID), Title: "About me", Body: "v2", Items: []ItemInput{name}}); err != nil {
 		t.Fatal(err)
 	}
 	afterDraft, _ := svc.GetPresentation(ctx)

@@ -14,6 +14,7 @@ type PresentationSectionView struct {
 	Kind        string
 	Title       string
 	Body        string
+	Items       []ItemView
 	Version     int
 	PublishedAt time.Time
 }
@@ -48,6 +49,7 @@ func (s *Service) GetPresentation(ctx context.Context) (PresentationView, error)
 			Kind:        string(kind),
 			Title:       published.Content.Title,
 			Body:        published.Content.Body,
+			Items:       toItemViews(published.Content.Items),
 			Version:     published.Number,
 			PublishedAt: published.PublishedAt,
 		})

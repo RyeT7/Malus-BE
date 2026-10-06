@@ -61,6 +61,7 @@ type sectionResponse struct {
 	Draft                 contentResponse  `json:"draft"`
 	Published             *versionResponse `json:"published,omitempty"`
 	HasUnpublishedChanges bool             `json:"hasUnpublishedChanges"`
+	Revision              int64            `json:"revision"`
 	CreatedAt             time.Time        `json:"createdAt"`
 	UpdatedAt             time.Time        `json:"updatedAt"`
 }
@@ -119,6 +120,7 @@ func toSectionResponse(v application.SectionView) sectionResponse {
 		Kind:                  v.Kind,
 		Draft:                 toContentResponse(v.Draft),
 		HasUnpublishedChanges: v.HasUnpublishedChanges,
+		Revision:              v.Revision,
 		CreatedAt:             v.CreatedAt,
 		UpdatedAt:             v.UpdatedAt,
 	}

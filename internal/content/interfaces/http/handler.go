@@ -64,7 +64,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Location", "/v1/sections/"+view.ID)
-	httpx.JSON(w, http.StatusCreated, toSectionResponse(view))
+	writeSection(w, http.StatusCreated, view)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -73,30 +73,44 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toSectionResponse(view))
+	writeSection(w, http.StatusOK, view)
 }
 
 func (h *Handler) editDraft(w http.ResponseWriter, r *http.Request) {
+	expected, ok := requireRevision(w, r)
+	if !ok {
+		return
+	}
 	var req draftRequest
 	if err := httpx.Decode(w, r, &req); err != nil {
 		httpx.Error(w, r, err)
 		return
 	}
-	view, err := h.svc.EditDraft(r.Context(), application.EditDraft{ID: kernel.ID(r.PathValue("id")), Title: req.Title, Body: req.Body, Items: toItemInputs(req.Items)})
+	view, err := h.svc.EditDraft(r.Context(), application.EditDraft{
+		ID:               kernel.ID(r.PathValue("id")),
+		ExpectedRevision: expected,
+		Title:            req.Title,
+		Body:             req.Body,
+		Items:            toItemInputs(req.Items),
+	})
 	if err != nil {
 		httpx.Error(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toSectionResponse(view))
+	writeSection(w, http.StatusOK, view)
 }
 
 func (h *Handler) publish(w http.ResponseWriter, r *http.Request) {
-	view, err := h.svc.Publish(r.Context(), kernel.ID(r.PathValue("id")))
+	expected, ok := requireRevision(w, r)
+	if !ok {
+		return
+	}
+	view, err := h.svc.Publish(r.Context(), kernel.ID(r.PathValue("id")), expected)
 	if err != nil {
 		httpx.Error(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toSectionResponse(view))
+	writeSection(w, http.StatusOK, view)
 }
 
 func (h *Handler) versions(w http.ResponseWriter, r *http.Request) {
@@ -109,15 +123,19 @@ func (h *Handler) versions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) rollback(w http.ResponseWriter, r *http.Request) {
+	expected, ok := requireRevision(w, r)
+	if !ok {
+		return
+	}
 	var req rollbackRequest
 	if err := httpx.Decode(w, r, &req); err != nil {
 		httpx.Error(w, r, err)
 		return
 	}
-	view, err := h.svc.Rollback(r.Context(), kernel.ID(r.PathValue("id")), req.Version)
+	view, err := h.svc.Rollback(r.Context(), kernel.ID(r.PathValue("id")), req.Version, expected)
 	if err != nil {
 		httpx.Error(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toSectionResponse(view))
+	writeSection(w, http.StatusOK, view)
 }

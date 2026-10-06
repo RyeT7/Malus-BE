@@ -49,6 +49,8 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 		Problem(w, r, http.StatusNotFound, "Not Found", err.Error())
 	case errors.Is(err, kernel.ErrConflict):
 		Problem(w, r, http.StatusConflict, "Conflict", err.Error())
+	case errors.Is(err, kernel.ErrPrecondition):
+		Problem(w, r, http.StatusPreconditionFailed, "Precondition Failed", "the resource was changed since you loaded it; reload to get the latest version")
 	case errors.Is(err, kernel.ErrConcurrentUpdate):
 		Problem(w, r, http.StatusConflict, "Conflict", "the resource was modified by another request; reload and retry")
 	default:

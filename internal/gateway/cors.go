@@ -9,7 +9,7 @@ import (
 
 const (
 	corsAllowMethods  = "GET, POST, PUT, PATCH, DELETE"
-	corsAllowHeaders  = "Authorization, Content-Type, Idempotency-Key, X-Request-ID, X-Viewer-ID"
+	corsAllowHeaders  = "Authorization, Content-Type, Idempotency-Key, If-Match, X-Request-ID, X-Viewer-ID"
 	corsExposeHeaders = "ETag, Location, Retry-After, X-Request-ID"
 )
 

@@ -11,6 +11,7 @@ var (
 	ErrInvalid  = errors.New("invalid")
 
 	ErrConcurrentUpdate = errors.New("concurrent update")
+	ErrPrecondition     = errors.New("precondition failed")
 )
 
 func NotFound(format string, args ...any) error {

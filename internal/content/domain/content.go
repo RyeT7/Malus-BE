@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"net/url"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -15,15 +16,78 @@ const (
 	maxHeadingRunes = 200
 	maxDetailRunes  = 5000
 	maxSemester     = 12
+	maxSources      = 10
+	maxSourceLabel  = 200
+	maxSourceURL    = 2048
+	maxAttachments  = 10
 
 	strengthsAndWeaknessesCount = 3
 	minWorkplanSemesters        = 2
 )
 
+type Source struct {
+	Label string
+	URL   string
+}
+
 type Item struct {
-	Heading  string
-	Detail   string
-	Semester int
+	Heading     string
+	Detail      string
+	Semester    int
+	Sources     []Source
+	Attachments []kernel.ID
+}
+
+func (i Item) equal(other Item) bool {
+	return i.Heading == other.Heading &&
+		i.Detail == other.Detail &&
+		i.Semester == other.Semester &&
+		slices.Equal(i.Sources, other.Sources) &&
+		slices.Equal(i.Attachments, other.Attachments)
+}
+
+func (i Item) clone() Item {
+	i.Sources = slices.Clone(i.Sources)
+	i.Attachments = slices.Clone(i.Attachments)
+	return i
+}
+
+func normalizeSources(index int, sources []Source) ([]Source, error) {
+	if len(sources) > maxSources {
+		return nil, kernel.Invalid("item %d: at most %d sources", index, maxSources)
+	}
+	normalized := make([]Source, 0, len(sources))
+	for j, src := range sources {
+		src.Label = strings.TrimSpace(src.Label)
+		src.URL = strings.TrimSpace(src.URL)
+		if utf8.RuneCountInString(src.Label) > maxSourceLabel {
+			return nil, kernel.Invalid("item %d, source %d: label exceeds %d characters", index, j+1, maxSourceLabel)
+		}
+		u, err := url.Parse(src.URL)
+		if err != nil || len(src.URL) > maxSourceURL || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, kernel.Invalid("item %d, source %d: URL must be an http or https link", index, j+1)
+		}
+		normalized = append(normalized, src)
+	}
+	return normalized, nil
+}
+
+func normalizeAttachments(index int, ids []kernel.ID) ([]kernel.ID, error) {
+	if len(ids) > maxAttachments {
+		return nil, kernel.Invalid("item %d: at most %d attachments", index, maxAttachments)
+	}
+	normalized := make([]kernel.ID, 0, len(ids))
+	for _, id := range ids {
+		id = kernel.ID(strings.TrimSpace(id.String()))
+		if id == "" {
+			return nil, kernel.Invalid("item %d: attachment id is required", index)
+		}
+		if slices.Contains(normalized, id) {
+			return nil, kernel.Invalid("item %d: attachment %s is listed twice", index, id)
+		}
+		normalized = append(normalized, id)
+	}
+	return normalized, nil
 }
 
 type Content struct {
@@ -61,18 +125,43 @@ func NewContent(title, body string, items []Item) (Content, error) {
 		case item.Semester < 0 || item.Semester > maxSemester:
 			return Content{}, kernel.Invalid("item %d: semester must be between 1 and %d", i+1, maxSemester)
 		}
+		sources, err := normalizeSources(i+1, item.Sources)
+		if err != nil {
+			return Content{}, err
+		}
+		attachments, err := normalizeAttachments(i+1, item.Attachments)
+		if err != nil {
+			return Content{}, err
+		}
+		item.Sources, item.Attachments = sources, attachments
 		normalized = append(normalized, item)
 	}
 	return Content{Title: title, Body: body, Items: normalized}, nil
 }
 
 func (c Content) Equal(other Content) bool {
-	return c.Title == other.Title && c.Body == other.Body && slices.Equal(c.Items, other.Items)
+	return c.Title == other.Title && c.Body == other.Body && slices.EqualFunc(c.Items, other.Items, Item.equal)
 }
 
 func (c Content) clone() Content {
-	c.Items = slices.Clone(c.Items)
+	items := make([]Item, len(c.Items))
+	for i, item := range c.Items {
+		items[i] = item.clone()
+	}
+	c.Items = items
 	return c
+}
+
+func (c Content) AttachmentIDs() []kernel.ID {
+	var ids []kernel.ID
+	for _, item := range c.Items {
+		for _, id := range item.Attachments {
+			if !slices.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
 }
 
 func (k Kind) checkDraft(c Content) error {

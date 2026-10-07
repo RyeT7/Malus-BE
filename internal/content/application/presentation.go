@@ -34,6 +34,17 @@ func (s *Service) GetPresentation(ctx context.Context) (PresentationView, error)
 		byKind[section.Kind()] = section
 	}
 
+	var published []domain.Content
+	for _, section := range sections {
+		if v, ok := section.Published(); ok {
+			published = append(published, v.Content)
+		}
+	}
+	files, err := s.attachmentIndex(ctx, published...)
+	if err != nil {
+		return PresentationView{}, err
+	}
+
 	view := PresentationView{Sections: make([]PresentationSectionView, 0, len(sections))}
 	fingerprint := sha256.New()
 	for _, kind := range domain.Kinds() {
@@ -49,7 +60,7 @@ func (s *Service) GetPresentation(ctx context.Context) (PresentationView, error)
 			Kind:        string(kind),
 			Title:       published.Content.Title,
 			Body:        published.Content.Body,
-			Items:       toItemViews(published.Content.Items),
+			Items:       toItemViews(published.Content.Items, files),
 			Version:     published.Number,
 			PublishedAt: published.PublishedAt,
 		})

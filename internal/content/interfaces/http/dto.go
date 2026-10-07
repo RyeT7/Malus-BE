@@ -6,10 +6,17 @@ import (
 	"malus-be/internal/content/application"
 )
 
+type sourceDTO struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
 type itemRequest struct {
-	Heading  string `json:"heading"`
-	Detail   string `json:"detail"`
-	Semester int    `json:"semester"`
+	Heading     string      `json:"heading"`
+	Detail      string      `json:"detail"`
+	Semester    int         `json:"semester"`
+	Sources     []sourceDTO `json:"sources"`
+	Attachments []string    `json:"attachments"`
 }
 
 type createRequest struct {
@@ -28,7 +35,11 @@ type draftRequest struct {
 func toItemInputs(items []itemRequest) []application.ItemInput {
 	inputs := make([]application.ItemInput, len(items))
 	for i, item := range items {
-		inputs[i] = application.ItemInput{Heading: item.Heading, Detail: item.Detail, Semester: item.Semester}
+		sources := make([]application.SourceInput, len(item.Sources))
+		for j, src := range item.Sources {
+			sources[j] = application.SourceInput{Label: src.Label, URL: src.URL}
+		}
+		inputs[i] = application.ItemInput{Heading: item.Heading, Detail: item.Detail, Semester: item.Semester, Sources: sources, Attachments: item.Attachments}
 	}
 	return inputs
 }
@@ -37,10 +48,25 @@ type rollbackRequest struct {
 	Version int `json:"version"`
 }
 
+type attachmentResponse struct {
+	ID          string    `json:"id"`
+	FileName    string    `json:"fileName"`
+	ContentType string    `json:"contentType"`
+	Size        int64     `json:"size"`
+	Ready       bool      `json:"ready"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+func toAttachmentResponse(v application.AttachmentView) attachmentResponse {
+	return attachmentResponse{ID: v.ID, FileName: v.FileName, ContentType: v.ContentType, Size: v.Size, Ready: v.Ready, CreatedAt: v.CreatedAt}
+}
+
 type itemResponse struct {
-	Heading  string `json:"heading"`
-	Detail   string `json:"detail"`
-	Semester int    `json:"semester,omitempty"`
+	Heading     string               `json:"heading"`
+	Detail      string               `json:"detail"`
+	Semester    int                  `json:"semester,omitempty"`
+	Sources     []sourceDTO          `json:"sources"`
+	Attachments []attachmentResponse `json:"attachments"`
 }
 
 type contentResponse struct {
@@ -101,7 +127,15 @@ type listResponse[T any] struct {
 func toItemResponses(items []application.ItemView) []itemResponse {
 	responses := make([]itemResponse, len(items))
 	for i, item := range items {
-		responses[i] = itemResponse{Heading: item.Heading, Detail: item.Detail, Semester: item.Semester}
+		sources := make([]sourceDTO, len(item.Sources))
+		for j, src := range item.Sources {
+			sources[j] = sourceDTO{Label: src.Label, URL: src.URL}
+		}
+		attachments := make([]attachmentResponse, len(item.Attachments))
+		for j, a := range item.Attachments {
+			attachments[j] = toAttachmentResponse(a)
+		}
+		responses[i] = itemResponse{Heading: item.Heading, Detail: item.Detail, Semester: item.Semester, Sources: sources, Attachments: attachments}
 	}
 	return responses
 }

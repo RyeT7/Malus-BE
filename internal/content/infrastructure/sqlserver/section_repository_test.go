@@ -115,10 +115,10 @@ func TestSectionRepositoryRoundTrip(t *testing.T) {
 	if len(v) != 2 || v[1].Content.Body != "second" || got.Draft().Body != "second" {
 		t.Fatalf("unexpected section after reload: draft=%q versions=%+v", got.Draft().Body, v)
 	}
-	if len(v[0].Content.Items) != 1 || len(v[1].Content.Items) != 2 || v[1].Content.Items[1] != major {
+	if len(v[0].Content.Items) != 1 || len(v[1].Content.Items) != 2 || v[1].Content.Items[1].Heading != major.Heading || v[1].Content.Items[1].Detail != major.Detail {
 		t.Fatalf("version items not persisted: v1=%+v v2=%+v", v[0].Content.Items, v[1].Content.Items)
 	}
-	if items := got.Draft().Items; len(items) != 2 || items[0] != name {
+	if items := got.Draft().Items; len(items) != 2 || items[0].Heading != name.Heading || items[0].Detail != name.Detail {
 		t.Fatalf("draft items not persisted: %+v", items)
 	}
 

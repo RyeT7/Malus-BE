@@ -13,7 +13,7 @@ import (
 func newTestService(t *testing.T) *Service {
 	t.Helper()
 	now := time.Date(2026, 10, 4, 9, 0, 0, 0, time.UTC)
-	return NewService(memory.NewSectionRepository(), messaging.NewMemoryBus("/test"), func() time.Time { return now })
+	return NewService(memory.NewSectionRepository(), memory.NewAttachmentRepository(), newFakeBlobs(), messaging.NewMemoryBus("/test"), func() time.Time { return now })
 }
 
 func create(t *testing.T, svc *Service, kind, title, body string, publish bool, items ...ItemInput) SectionView {

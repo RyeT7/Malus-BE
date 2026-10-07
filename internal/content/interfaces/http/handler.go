@@ -9,15 +9,20 @@ import (
 )
 
 type Handler struct {
-	svc *application.Service
+	svc       *application.Service
+	adminRole string
 }
 
-func NewHandler(svc *application.Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *application.Service, adminRole string) *Handler {
+	return &Handler{svc: svc, adminRole: adminRole}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/presentation", h.presentation)
+	mux.HandleFunc("GET /v1/attachments", h.listAttachments)
+	mux.HandleFunc("POST /v1/attachments", h.requestUpload)
+	mux.HandleFunc("POST /v1/attachments/{id}/complete", h.completeUpload)
+	mux.HandleFunc("GET /v1/attachments/{id}/content", h.attachmentContent)
 	mux.HandleFunc("GET /v1/sections", h.list)
 	mux.HandleFunc("POST /v1/sections", h.create)
 	mux.HandleFunc("GET /v1/sections/{id}", h.get)

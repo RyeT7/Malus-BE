@@ -9,7 +9,6 @@ import (
 
 	"malus-be/internal/content/domain"
 	"malus-be/internal/kernel"
-	"malus-be/internal/platform/sqldb"
 )
 
 type SectionRepository struct {
@@ -21,7 +20,7 @@ func NewSectionRepository(db *sql.DB) *SectionRepository {
 }
 
 const selectSections = `
-SELECT id, kind, draft_title, draft_body, draft_items, created_at, updated_at, revision
+SELECT id, draft_title, draft_body, draft_layout, draft_items, created_at, updated_at, revision
 FROM dbo.sections`
 
 func (r *SectionRepository) Get(ctx context.Context, id kernel.ID) (*domain.Section, error) {
@@ -35,19 +34,8 @@ func (r *SectionRepository) Get(ctx context.Context, id kernel.ID) (*domain.Sect
 	return sections[0], nil
 }
 
-func (r *SectionRepository) FindByKind(ctx context.Context, kind domain.Kind) (*domain.Section, error) {
-	sections, err := r.load(ctx, selectSections+` WHERE kind = @kind`, sql.Named("kind", string(kind)))
-	if err != nil {
-		return nil, err
-	}
-	if len(sections) == 0 {
-		return nil, kernel.NotFound("section of kind %q", kind)
-	}
-	return sections[0], nil
-}
-
 func (r *SectionRepository) List(ctx context.Context) ([]*domain.Section, error) {
-	return r.load(ctx, selectSections+` ORDER BY created_at`)
+	return r.load(ctx, selectSections+` ORDER BY position, created_at`)
 }
 
 func (r *SectionRepository) Save(ctx context.Context, s *domain.Section) error {
@@ -65,30 +53,29 @@ func (r *SectionRepository) Save(ctx context.Context, s *domain.Section) error {
 
 	if snap.Revision == 0 {
 		_, err := tx.ExecContext(ctx, `
-INSERT INTO dbo.sections (id, kind, draft_title, draft_body, draft_items, created_at, updated_at, revision)
-VALUES (@id, @kind, @title, @body, @items, @created_at, @updated_at, 1)`,
+INSERT INTO dbo.sections (id, position, draft_title, draft_body, draft_layout, draft_items, created_at, updated_at, revision)
+SELECT @id, COALESCE(MAX(position), 0) + 1, @title, @body, @layout, @items, @created_at, @updated_at, 1
+FROM dbo.sections WITH (UPDLOCK, HOLDLOCK)`,
 			sql.Named("id", snap.ID.String()),
-			sql.Named("kind", string(snap.Kind)),
 			sql.Named("title", snap.Draft.Title),
 			sql.Named("body", snap.Draft.Body),
+			sql.Named("layout", string(snap.Draft.Layout)),
 			sql.Named("items", draftItems),
 			sql.Named("created_at", snap.CreatedAt),
 			sql.Named("updated_at", snap.UpdatedAt),
 		)
-		if sqldb.IsUniqueViolation(err) {
-			return kernel.Conflict("section of kind %q already exists", snap.Kind)
-		}
 		if err != nil {
 			return fmt.Errorf("insert section: %w", err)
 		}
 	} else {
 		res, err := tx.ExecContext(ctx, `
 UPDATE dbo.sections
-SET draft_title = @title, draft_body = @body, draft_items = @items, updated_at = @updated_at, revision = revision + 1
+SET draft_title = @title, draft_body = @body, draft_layout = @layout, draft_items = @items, updated_at = @updated_at, revision = revision + 1
 WHERE id = @id AND revision = @revision`,
 			sql.Named("id", snap.ID.String()),
 			sql.Named("title", snap.Draft.Title),
 			sql.Named("body", snap.Draft.Body),
+			sql.Named("layout", string(snap.Draft.Layout)),
 			sql.Named("items", draftItems),
 			sql.Named("updated_at", snap.UpdatedAt),
 			sql.Named("revision", snap.Revision),
@@ -119,12 +106,13 @@ WHERE id = @id AND revision = @revision`,
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO dbo.section_versions (section_id, number, title, body, items, published_at)
-VALUES (@id, @number, @title, @body, @items, @published_at)`,
+INSERT INTO dbo.section_versions (section_id, number, title, body, layout, items, published_at)
+VALUES (@id, @number, @title, @body, @layout, @items, @published_at)`,
 			sql.Named("id", snap.ID.String()),
 			sql.Named("number", v.Number),
 			sql.Named("title", v.Content.Title),
 			sql.Named("body", v.Content.Body),
+			sql.Named("layout", string(v.Content.Layout)),
 			sql.Named("items", versionItems),
 			sql.Named("published_at", v.PublishedAt),
 		); err != nil {
@@ -132,6 +120,59 @@ VALUES (@id, @number, @title, @body, @items, @published_at)`,
 		}
 	}
 
+	return tx.Commit()
+}
+
+func (r *SectionRepository) Delete(ctx context.Context, s *domain.Section) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	id := sql.Named("id", s.ID().String())
+	if _, err := tx.ExecContext(ctx, `DELETE FROM dbo.section_versions WHERE section_id = @id`, id); err != nil {
+		return fmt.Errorf("delete versions: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM dbo.sections WHERE id = @id AND revision = @revision`, id, sql.Named("revision", s.Revision()))
+	if err != nil {
+		return fmt.Errorf("delete section: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return kernel.ErrConcurrentUpdate
+	}
+	return tx.Commit()
+}
+
+func (r *SectionRepository) Reorder(ctx context.Context, ids []kernel.ID) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	changed := kernel.Conflict("the sections changed while reordering; reload and try again")
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM dbo.sections WITH (UPDLOCK, HOLDLOCK)`).Scan(&total); err != nil {
+		return fmt.Errorf("count sections: %w", err)
+	}
+	if total != len(ids) {
+		return changed
+	}
+	for i, id := range ids {
+		res, err := tx.ExecContext(ctx, `UPDATE dbo.sections SET position = @position WHERE id = @id`,
+			sql.Named("position", i+1), sql.Named("id", id.String()))
+		if err != nil {
+			return fmt.Errorf("reorder section %s: %w", id, err)
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return changed
+		}
+	}
 	return tx.Commit()
 }
 
@@ -147,10 +188,10 @@ func (r *SectionRepository) load(ctx context.Context, query string, args ...any)
 	for rows.Next() {
 		var (
 			snap               domain.Snapshot
-			id, kind, items    string
+			id, layout, items  string
 			createdAt, updated time.Time
 		)
-		if err := rows.Scan(&id, &kind, &snap.Draft.Title, &snap.Draft.Body, &items, &createdAt, &updated, &snap.Revision); err != nil {
+		if err := rows.Scan(&id, &snap.Draft.Title, &snap.Draft.Body, &layout, &items, &createdAt, &updated, &snap.Revision); err != nil {
 			return nil, err
 		}
 		if snap.Draft.Items, err = decodeItems(items); err != nil {
@@ -158,7 +199,7 @@ func (r *SectionRepository) load(ctx context.Context, query string, args ...any)
 		}
 		id = strings.TrimSpace(id)
 		snap.ID = kernel.ID(id)
-		snap.Kind = domain.Kind(kind)
+		snap.Draft.Layout = domain.Layout(layout)
 		snap.CreatedAt = createdAt.UTC()
 		snap.UpdatedAt = updated.UTC()
 		index[id] = len(snaps)
@@ -192,7 +233,7 @@ func (r *SectionRepository) loadVersions(ctx context.Context, snaps []domain.Sna
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-SELECT section_id, number, title, body, items, published_at
+SELECT section_id, number, title, body, layout, items, published_at
 FROM dbo.section_versions
 WHERE section_id IN (`+strings.Join(placeholders, ", ")+`)
 ORDER BY section_id, number`, args...)
@@ -203,12 +244,13 @@ ORDER BY section_id, number`, args...)
 
 	for rows.Next() {
 		var (
-			sectionID, items string
-			v                domain.Version
+			sectionID, layout, items string
+			v                        domain.Version
 		)
-		if err := rows.Scan(&sectionID, &v.Number, &v.Content.Title, &v.Content.Body, &items, &v.PublishedAt); err != nil {
+		if err := rows.Scan(&sectionID, &v.Number, &v.Content.Title, &v.Content.Body, &layout, &items, &v.PublishedAt); err != nil {
 			return err
 		}
+		v.Content.Layout = domain.Layout(layout)
 		if v.Content.Items, err = decodeItems(items); err != nil {
 			return err
 		}

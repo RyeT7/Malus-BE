@@ -4,7 +4,7 @@ import "malus-be/internal/kernel"
 
 type SectionCreated struct {
 	kernel.EventBase
-	Kind Kind `json:"kind"`
+	Title string `json:"title"`
 }
 
 func (SectionCreated) EventType() string { return "content.section.created" }
@@ -29,3 +29,9 @@ type SectionRolledBack struct {
 }
 
 func (SectionRolledBack) EventType() string { return "content.section.rolled_back" }
+
+type SectionDeleted struct {
+	kernel.EventBase
+}
+
+func (SectionDeleted) EventType() string { return "content.section.deleted" }

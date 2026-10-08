@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"malus-be/internal/content/domain"
 	"malus-be/internal/kernel"
@@ -49,35 +50,31 @@ func toItems(inputs []ItemInput) []domain.Item {
 	return items
 }
 
+func (s *Service) newContent(ctx context.Context, title, body, layout string, items []ItemInput) (domain.Content, error) {
+	l, err := domain.ParseLayout(layout)
+	if err != nil {
+		return domain.Content{}, err
+	}
+	content, err := domain.NewContent(title, body, l, toItems(items))
+	if err != nil {
+		return domain.Content{}, err
+	}
+	return content, s.checkAttachments(ctx, content)
+}
+
 type CreateSection struct {
-	Kind  string
-	Title string
-	Body  string
-	Items []ItemInput
+	Title  string
+	Body   string
+	Layout string
+	Items  []ItemInput
 }
 
 func (s *Service) CreateSection(ctx context.Context, cmd CreateSection) (SectionView, error) {
-	kind, err := domain.ParseKind(cmd.Kind)
+	content, err := s.newContent(ctx, cmd.Title, cmd.Body, cmd.Layout, cmd.Items)
 	if err != nil {
 		return SectionView{}, err
 	}
-	content, err := domain.NewContent(cmd.Title, cmd.Body, toItems(cmd.Items))
-	if err != nil {
-		return SectionView{}, err
-	}
-	if err := s.checkAttachments(ctx, content); err != nil {
-		return SectionView{}, err
-	}
-	if _, err := s.repo.FindByKind(ctx, kind); err == nil {
-		return SectionView{}, kernel.Conflict("section of kind %q already exists", kind)
-	} else if !errors.Is(err, kernel.ErrNotFound) {
-		return SectionView{}, err
-	}
-
-	section, err := domain.NewSection(kind, content, s.now())
-	if err != nil {
-		return SectionView{}, err
-	}
+	section := domain.NewSection(content, s.now())
 	if err := s.commit(ctx, section); err != nil {
 		return SectionView{}, err
 	}
@@ -89,20 +86,68 @@ type EditDraft struct {
 	ExpectedRevision int64
 	Title            string
 	Body             string
+	Layout           string
 	Items            []ItemInput
 }
 
 func (s *Service) EditDraft(ctx context.Context, cmd EditDraft) (SectionView, error) {
-	content, err := domain.NewContent(cmd.Title, cmd.Body, toItems(cmd.Items))
+	content, err := s.newContent(ctx, cmd.Title, cmd.Body, cmd.Layout, cmd.Items)
 	if err != nil {
 		return SectionView{}, err
 	}
-	if err := s.checkAttachments(ctx, content); err != nil {
-		return SectionView{}, err
-	}
 	return s.change(ctx, cmd.ID, cmd.ExpectedRevision, func(section *domain.Section) error {
-		return section.EditDraft(content, s.now())
+		section.EditDraft(content, s.now())
+		return nil
 	})
+}
+
+func (s *Service) DeleteSection(ctx context.Context, id kernel.ID, expectedRevision int64) error {
+	section, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if section.Revision() != expectedRevision {
+		return kernel.ErrPrecondition
+	}
+	section.Delete(s.now())
+	if err := s.repo.Delete(ctx, section); err != nil {
+		if errors.Is(err, kernel.ErrConcurrentUpdate) {
+			return kernel.ErrPrecondition
+		}
+		return err
+	}
+	return s.events.Publish(ctx, section.PullEvents()...)
+}
+
+func (s *Service) ReorderSections(ctx context.Context, ids []string) ([]SectionView, error) {
+	sections, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	existing := make(map[kernel.ID]bool, len(sections))
+	for _, section := range sections {
+		existing[section.ID()] = true
+	}
+	order := make([]kernel.ID, 0, len(ids))
+	seen := make(map[kernel.ID]bool, len(ids))
+	for _, raw := range ids {
+		id := kernel.ID(strings.TrimSpace(raw))
+		if !existing[id] {
+			return nil, kernel.Invalid("section %s does not exist", id)
+		}
+		if seen[id] {
+			return nil, kernel.Invalid("section %s is listed twice", id)
+		}
+		seen[id] = true
+		order = append(order, id)
+	}
+	if len(order) != len(sections) {
+		return nil, kernel.Invalid("the order must list all %d sections, got %d", len(sections), len(order))
+	}
+	if err := s.repo.Reorder(ctx, order); err != nil {
+		return nil, err
+	}
+	return s.ListSections(ctx)
 }
 
 func (s *Service) Publish(ctx context.Context, id kernel.ID, expectedRevision int64) (SectionView, error) {

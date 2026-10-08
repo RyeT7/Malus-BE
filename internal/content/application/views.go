@@ -23,9 +23,10 @@ type ItemView struct {
 type attachmentIndex = map[kernel.ID]AttachmentView
 
 type ContentView struct {
-	Title string
-	Body  string
-	Items []ItemView
+	Title  string
+	Body   string
+	Layout string
+	Items  []ItemView
 }
 
 type VersionView struct {
@@ -36,7 +37,6 @@ type VersionView struct {
 
 type SectionView struct {
 	ID                    string
-	Kind                  string
 	Draft                 ContentView
 	Published             *VersionView
 	HasUnpublishedChanges bool
@@ -64,7 +64,7 @@ func toItemViews(items []domain.Item, files attachmentIndex) []ItemView {
 }
 
 func toContentView(c domain.Content, files attachmentIndex) ContentView {
-	return ContentView{Title: c.Title, Body: c.Body, Items: toItemViews(c.Items, files)}
+	return ContentView{Title: c.Title, Body: c.Body, Layout: string(c.Layout), Items: toItemViews(c.Items, files)}
 }
 
 func toVersionView(v domain.Version, files attachmentIndex) VersionView {
@@ -74,7 +74,6 @@ func toVersionView(v domain.Version, files attachmentIndex) VersionView {
 func toSectionView(s *domain.Section, files attachmentIndex) SectionView {
 	view := SectionView{
 		ID:                    s.ID().String(),
-		Kind:                  string(s.Kind()),
 		Draft:                 toContentView(s.Draft(), files),
 		HasUnpublishedChanges: s.HasUnpublishedChanges(),
 		Revision:              s.Revision(),

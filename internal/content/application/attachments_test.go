@@ -86,15 +86,15 @@ func TestDraftsOnlyAcceptReadyAttachments(t *testing.T) {
 	item := func(id string) []ItemInput {
 		return []ItemInput{{Heading: "Fact", Detail: "x", Attachments: []string{id}}}
 	}
-	if _, err := svc.CreateSection(ctx, CreateSection{Kind: "biodata", Title: "Bio", Items: item(pending.Attachment.ID)}); !errors.Is(err, kernel.ErrInvalid) {
+	if _, err := svc.CreateSection(ctx, CreateSection{Layout: "facts", Title: "Bio", Items: item(pending.Attachment.ID)}); !errors.Is(err, kernel.ErrInvalid) {
 		t.Fatalf("pending attachment: want ErrInvalid, got %v", err)
 	}
-	if _, err := svc.CreateSection(ctx, CreateSection{Kind: "biodata", Title: "Bio", Items: item("does-not-exist")}); !errors.Is(err, kernel.ErrInvalid) {
+	if _, err := svc.CreateSection(ctx, CreateSection{Layout: "facts", Title: "Bio", Items: item("does-not-exist")}); !errors.Is(err, kernel.ErrInvalid) {
 		t.Fatalf("unknown attachment: want ErrInvalid, got %v", err)
 	}
 
 	ready := uploadReady(t, svc, blobs)
-	view, err := svc.CreateSection(ctx, CreateSection{Kind: "biodata", Title: "Bio", Items: []ItemInput{{
+	view, err := svc.CreateSection(ctx, CreateSection{Layout: "facts", Title: "Bio", Items: []ItemInput{{
 		Heading: "Fact", Detail: "x",
 		Sources:     []SourceInput{{Label: "Registry", URL: "https://example.com/registry"}},
 		Attachments: []string{ready.ID},
@@ -114,7 +114,7 @@ func TestPublicDownloadsOnlyPublishedAttachments(t *testing.T) {
 	file := uploadReady(t, svc, blobs)
 	id := kernel.ID(file.ID)
 
-	section, err := svc.CreateSection(ctx, CreateSection{Kind: "biodata", Title: "Bio", Items: []ItemInput{{Heading: "Fact", Detail: "x", Attachments: []string{file.ID}}}})
+	section, err := svc.CreateSection(ctx, CreateSection{Layout: "facts", Title: "Bio", Items: []ItemInput{{Heading: "Fact", Detail: "x", Attachments: []string{file.ID}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

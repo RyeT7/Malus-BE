@@ -11,9 +11,10 @@ import (
 )
 
 type PresentationSectionView struct {
-	Kind        string
+	ID          string
 	Title       string
 	Body        string
+	Layout      string
 	Items       []ItemView
 	Version     int
 	PublishedAt time.Time
@@ -29,11 +30,6 @@ func (s *Service) GetPresentation(ctx context.Context) (PresentationView, error)
 	if err != nil {
 		return PresentationView{}, err
 	}
-	byKind := make(map[domain.Kind]*domain.Section, len(sections))
-	for _, section := range sections {
-		byKind[section.Kind()] = section
-	}
-
 	var published []domain.Content
 	for _, section := range sections {
 		if v, ok := section.Published(); ok {
@@ -47,24 +43,21 @@ func (s *Service) GetPresentation(ctx context.Context) (PresentationView, error)
 
 	view := PresentationView{Sections: make([]PresentationSectionView, 0, len(sections))}
 	fingerprint := sha256.New()
-	for _, kind := range domain.Kinds() {
-		section, ok := byKind[kind]
-		if !ok {
-			continue
-		}
+	for _, section := range sections {
 		published, ok := section.Published()
 		if !ok {
 			continue
 		}
 		view.Sections = append(view.Sections, PresentationSectionView{
-			Kind:        string(kind),
+			ID:          section.ID().String(),
 			Title:       published.Content.Title,
 			Body:        published.Content.Body,
+			Layout:      string(published.Content.Layout),
 			Items:       toItemViews(published.Content.Items, files),
 			Version:     published.Number,
 			PublishedAt: published.PublishedAt,
 		})
-		fmt.Fprintf(fingerprint, "%s:%s:%d;", kind, section.ID(), published.Number)
+		fmt.Fprintf(fingerprint, "%s:%d;", section.ID(), published.Number)
 	}
 	view.Revision = hex.EncodeToString(fingerprint.Sum(nil))[:32]
 	return view, nil

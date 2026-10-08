@@ -2,44 +2,10 @@ package domain
 
 import (
 	"context"
-	"slices"
 	"time"
 
 	"malus-be/internal/kernel"
 )
-
-type Kind string
-
-const (
-	KindBiodata         Kind = "biodata"
-	KindStrengths       Kind = "strengths"
-	KindWeaknesses      Kind = "weaknesses"
-	KindWorkplan        Kind = "workplan"
-	KindInnovations     Kind = "innovations"
-	KindProposedChanges Kind = "proposed_changes"
-	KindWhyMe           Kind = "why_me"
-)
-
-var kindOrder = []Kind{
-	KindBiodata,
-	KindStrengths,
-	KindWeaknesses,
-	KindWorkplan,
-	KindInnovations,
-	KindProposedChanges,
-	KindWhyMe,
-}
-
-func Kinds() []Kind {
-	return slices.Clone(kindOrder)
-}
-
-func ParseKind(s string) (Kind, error) {
-	if k := Kind(s); slices.Contains(kindOrder, k) {
-		return k, nil
-	}
-	return "", kernel.Invalid("unknown section kind %q", s)
-}
 
 type Version struct {
 	Number      int
@@ -50,7 +16,6 @@ type Version struct {
 type Section struct {
 	kernel.AggregateRoot
 	id        kernel.ID
-	kind      Kind
 	draft     Content
 	versions  []Version
 	createdAt time.Time
@@ -58,23 +23,18 @@ type Section struct {
 	revision  int64
 }
 
-func NewSection(kind Kind, draft Content, now time.Time) (*Section, error) {
-	if err := kind.checkDraft(draft); err != nil {
-		return nil, err
-	}
+func NewSection(draft Content, now time.Time) *Section {
 	s := &Section{
 		id:        kernel.NewID(),
-		kind:      kind,
 		draft:     draft.clone(),
 		createdAt: now,
 		updatedAt: now,
 	}
-	s.Record(SectionCreated{EventBase: kernel.NewEventBase(s.id, now), Kind: kind})
-	return s, nil
+	s.Record(SectionCreated{EventBase: kernel.NewEventBase(s.id, now), Title: draft.Title})
+	return s
 }
 
 func (s *Section) ID() kernel.ID        { return s.id }
-func (s *Section) Kind() Kind           { return s.kind }
 func (s *Section) Draft() Content       { return s.draft.clone() }
 func (s *Section) CreatedAt() time.Time { return s.createdAt }
 func (s *Section) UpdatedAt() time.Time { return s.updatedAt }
@@ -103,25 +63,18 @@ func (s *Section) HasUnpublishedChanges() bool {
 	return !ok || !p.Content.Equal(s.draft)
 }
 
-func (s *Section) EditDraft(c Content, now time.Time) error {
-	if err := s.kind.checkDraft(c); err != nil {
-		return err
-	}
+func (s *Section) EditDraft(c Content, now time.Time) {
 	if c.Equal(s.draft) {
-		return nil
+		return
 	}
 	s.draft = c.clone()
 	s.updatedAt = now
 	s.Record(DraftEdited{EventBase: kernel.NewEventBase(s.id, now)})
-	return nil
 }
 
 func (s *Section) Publish(now time.Time) (Version, error) {
 	if !s.HasUnpublishedChanges() {
 		return Version{}, kernel.Conflict("section %s has no unpublished changes", s.id)
-	}
-	if err := s.kind.checkPublishable(s.draft); err != nil {
-		return Version{}, err
 	}
 	v := Version{Number: len(s.versions) + 1, Content: s.draft.clone(), PublishedAt: now}
 	s.versions = append(s.versions, v)
@@ -145,9 +98,12 @@ func (s *Section) Rollback(number int, now time.Time) (Version, error) {
 	return v, nil
 }
 
+func (s *Section) Delete(now time.Time) {
+	s.Record(SectionDeleted{EventBase: kernel.NewEventBase(s.id, now)})
+}
+
 type Snapshot struct {
 	ID        kernel.ID
-	Kind      Kind
 	Draft     Content
 	Versions  []Version
 	CreatedAt time.Time
@@ -158,7 +114,6 @@ type Snapshot struct {
 func (s *Section) Snapshot() Snapshot {
 	return Snapshot{
 		ID:        s.id,
-		Kind:      s.kind,
 		Draft:     s.draft.clone(),
 		Versions:  s.Versions(),
 		CreatedAt: s.createdAt,
@@ -170,7 +125,6 @@ func (s *Section) Snapshot() Snapshot {
 func Restore(snap Snapshot) *Section {
 	return &Section{
 		id:        snap.ID,
-		kind:      snap.Kind,
 		draft:     snap.Draft.clone(),
 		versions:  restoreVersions(snap.Versions),
 		createdAt: snap.CreatedAt,
@@ -190,7 +144,8 @@ func restoreVersions(versions []Version) []Version {
 
 type Repository interface {
 	Get(ctx context.Context, id kernel.ID) (*Section, error)
-	FindByKind(ctx context.Context, kind Kind) (*Section, error)
 	List(ctx context.Context) ([]*Section, error)
 	Save(ctx context.Context, s *Section) error
+	Delete(ctx context.Context, s *Section) error
+	Reorder(ctx context.Context, ids []kernel.ID) error
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -56,4 +58,22 @@ func StatusCode(err error) int {
 		return re.StatusCode
 	}
 	return 0
+}
+
+func WaitForContainer(ctx context.Context, client *azcosmos.Client, database, container, partitionKeyPath string, log *slog.Logger) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	for {
+		err := EnsureContainer(ctx, client, database, container, partitionKeyPath)
+		if err == nil {
+			log.Info("cosmos container ready", "database", database, "container", container)
+			return nil
+		}
+		log.Warn("waiting for cosmos emulator", "error", err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("bootstrap cosmos: %w", err)
+		case <-time.After(3 * time.Second):
+		}
+	}
 }

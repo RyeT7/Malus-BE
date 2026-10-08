@@ -50,6 +50,9 @@ func newProxy(name string, target *url.URL, log *slog.Logger) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+		}
 		proxy.ServeHTTP(w, r)
 	})
 }

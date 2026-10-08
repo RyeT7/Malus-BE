@@ -37,4 +37,8 @@ var Routes = []Route{
 	{"POST /v1/sessions", "realtime", Admin},
 	{"GET /v1/sessions/{id}", "realtime", Public},
 	{"PUT /v1/sessions/{id}/slide", "realtime", Admin},
+	{"POST /v1/sessions/{id}/end", "realtime", Admin},
+	{"GET /v1/live/session", "realtime", Public},
+	{"GET /v1/live/connection", "realtime", Public},
+	{"GET /v1/live/stream", "realtime", Public},
 }

@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -183,3 +183,79 @@ jobs:
           IMAGE: ${{ steps.image.outputs.name }}
           DIGEST: ${{ steps.push.outputs.digest }}
         run: docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}@${DIGEST}"
+
+  deploy:
+    needs: publish-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: prod
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RESOURCE_GROUP: rg-malus-prod
+      APP_PREFIX: ca-malus-prod
+      MIGRATION_JOB: caj-malus-prod-migrate
+      TAG: sha-${{ github.sha }}
+    steps:
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Image prefix
+        run: echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/malus-be" >> "$GITHUB_ENV"
+
+      - name: Migrate content database
+        run: |
+          az containerapp job update -n "$MIGRATION_JOB" -g "$RESOURCE_GROUP" \
+            --container-name migrate --image "$IMAGE_PREFIX-content:$TAG" -o none
+          execution=$(az containerapp job start -n "$MIGRATION_JOB" -g "$RESOURCE_GROUP" --query name -o tsv)
+          for _ in $(seq 66); do
+            status=$(az containerapp job execution show -n "$MIGRATION_JOB" -g "$RESOURCE_GROUP" \
+              --job-execution-name "$execution" --query properties.status -o tsv)
+            echo "$execution: $status"
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped|Degraded) exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "Migration did not finish in time"
+          exit 1
+
+      - name: Roll out services
+        run: |
+          for service in content interaction realtime worker gateway; do
+            app="$APP_PREFIX-$service"
+            az containerapp update -n "$app" -g "$RESOURCE_GROUP" \
+              --container-name app --image "$IMAGE_PREFIX-$service:$TAG" -o none
+            revision=$(az containerapp show -n "$app" -g "$RESOURCE_GROUP" --query properties.latestRevisionName -o tsv)
+            state=Provisioning
+            for _ in $(seq 30); do
+              state=$(az containerapp revision show -n "$app" -g "$RESOURCE_GROUP" --revision "$revision" \
+                --query properties.provisioningState -o tsv)
+              [ "$state" != "Provisioning" ] && break
+              sleep 10
+            done
+            echo "$app: $revision $state"
+            if [ "$state" != "Provisioned" ]; then
+              az containerapp revision show -n "$app" -g "$RESOURCE_GROUP" --revision "$revision" \
+                --query properties.provisioningError -o tsv
+              exit 1
+            fi
+          done
+
+      - name: Smoke test
+        run: |
+          fqdn=$(az containerapp show -n "$APP_PREFIX-gateway" -g "$RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          for path in /healthz /v1/presentation /v1/questions /v1/live/connection; do
+            echo "GET https://$fqdn$path"
+            curl -fsS --retry 40 --retry-delay 10 --retry-all-errors --max-time 30 "https://$fqdn$path" > /dev/null
+          done

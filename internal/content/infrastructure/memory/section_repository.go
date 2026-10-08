@@ -2,7 +2,7 @@ package memory
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"sync"
 
 	"malus-be/internal/content/domain"
@@ -12,6 +12,7 @@ import (
 type SectionRepository struct {
 	mu    sync.RWMutex
 	items map[kernel.ID]domain.Snapshot
+	order []kernel.ID
 }
 
 func NewSectionRepository() *SectionRepository {
@@ -28,27 +29,13 @@ func (r *SectionRepository) Get(_ context.Context, id kernel.ID) (*domain.Sectio
 	return domain.Restore(snap), nil
 }
 
-func (r *SectionRepository) FindByKind(_ context.Context, kind domain.Kind) (*domain.Section, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for _, snap := range r.items {
-		if snap.Kind == kind {
-			return domain.Restore(snap), nil
-		}
-	}
-	return nil, kernel.NotFound("section of kind %q", kind)
-}
-
 func (r *SectionRepository) List(_ context.Context) ([]*domain.Section, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	sections := make([]*domain.Section, 0, len(r.items))
-	for _, snap := range r.items {
-		sections = append(sections, domain.Restore(snap))
+	sections := make([]*domain.Section, 0, len(r.order))
+	for _, id := range r.order {
+		sections = append(sections, domain.Restore(r.items[id]))
 	}
-	sort.Slice(sections, func(i, j int) bool {
-		return sections[i].CreatedAt().Before(sections[j].CreatedAt())
-	})
 	return sections, nil
 }
 
@@ -60,12 +47,37 @@ func (r *SectionRepository) Save(_ context.Context, s *domain.Section) error {
 	if exists != (snap.Revision != 0) || (exists && current.Revision != snap.Revision) {
 		return kernel.ErrConcurrentUpdate
 	}
-	for _, other := range r.items {
-		if other.ID != snap.ID && other.Kind == snap.Kind {
-			return kernel.Conflict("section of kind %q already exists", snap.Kind)
-		}
+	if !exists {
+		r.order = append(r.order, snap.ID)
 	}
 	snap.Revision++
 	r.items[snap.ID] = snap
+	return nil
+}
+
+func (r *SectionRepository) Delete(_ context.Context, s *domain.Section) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, exists := r.items[s.ID()]
+	if !exists || current.Revision != s.Revision() {
+		return kernel.ErrConcurrentUpdate
+	}
+	delete(r.items, s.ID())
+	r.order = slices.DeleteFunc(r.order, func(id kernel.ID) bool { return id == s.ID() })
+	return nil
+}
+
+func (r *SectionRepository) Reorder(_ context.Context, ids []kernel.ID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(ids) != len(r.items) {
+		return kernel.Conflict("the sections changed while reordering; reload and try again")
+	}
+	for _, id := range ids {
+		if _, ok := r.items[id]; !ok {
+			return kernel.Conflict("the sections changed while reordering; reload and try again")
+		}
+	}
+	r.order = slices.Clone(ids)
 	return nil
 }

@@ -20,7 +20,7 @@ func TestSectionRepositoryPersistsSourcesAndAttachmentRefs(t *testing.T) {
 		Sources:     []domain.Source{{Label: "Issuer", URL: "https://example.com/verify"}},
 		Attachments: []kernel.ID{"11111111-2222-4333-8444-555555555555"},
 	}
-	s := mustSection(t, domain.KindInnovations, "Innovations", "", now, item)
+	s := mustSection(t, domain.LayoutList, "Innovations", "", now, item)
 	if err := repo.Save(ctx, s); err != nil {
 		t.Fatal(err)
 	}

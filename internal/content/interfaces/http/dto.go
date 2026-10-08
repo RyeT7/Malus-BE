@@ -19,17 +19,15 @@ type itemRequest struct {
 	Attachments []string    `json:"attachments"`
 }
 
-type createRequest struct {
-	Kind  string        `json:"kind"`
-	Title string        `json:"title"`
-	Body  string        `json:"body"`
-	Items []itemRequest `json:"items"`
+type contentRequest struct {
+	Title  string        `json:"title"`
+	Body   string        `json:"body"`
+	Layout string        `json:"layout"`
+	Items  []itemRequest `json:"items"`
 }
 
-type draftRequest struct {
-	Title string        `json:"title"`
-	Body  string        `json:"body"`
-	Items []itemRequest `json:"items"`
+type orderRequest struct {
+	IDs []string `json:"ids"`
 }
 
 func toItemInputs(items []itemRequest) []application.ItemInput {
@@ -70,9 +68,10 @@ type itemResponse struct {
 }
 
 type contentResponse struct {
-	Title string         `json:"title"`
-	Body  string         `json:"body"`
-	Items []itemResponse `json:"items"`
+	Title  string         `json:"title"`
+	Body   string         `json:"body"`
+	Layout string         `json:"layout"`
+	Items  []itemResponse `json:"items"`
 }
 
 type versionResponse struct {
@@ -83,7 +82,6 @@ type versionResponse struct {
 
 type sectionResponse struct {
 	ID                    string           `json:"id"`
-	Kind                  string           `json:"kind"`
 	Draft                 contentResponse  `json:"draft"`
 	Published             *versionResponse `json:"published,omitempty"`
 	HasUnpublishedChanges bool             `json:"hasUnpublishedChanges"`
@@ -93,9 +91,10 @@ type sectionResponse struct {
 }
 
 type presentationSectionResponse struct {
-	Kind        string         `json:"kind"`
+	ID          string         `json:"id"`
 	Title       string         `json:"title"`
 	Body        string         `json:"body"`
+	Layout      string         `json:"layout"`
 	Items       []itemResponse `json:"items"`
 	Version     int            `json:"version"`
 	PublishedAt time.Time      `json:"publishedAt"`
@@ -109,9 +108,10 @@ func toPresentationResponse(v application.PresentationView) presentationResponse
 	sections := make([]presentationSectionResponse, 0, len(v.Sections))
 	for _, s := range v.Sections {
 		sections = append(sections, presentationSectionResponse{
-			Kind:        s.Kind,
+			ID:          s.ID,
 			Title:       s.Title,
 			Body:        s.Body,
+			Layout:      s.Layout,
 			Items:       toItemResponses(s.Items),
 			Version:     s.Version,
 			PublishedAt: s.PublishedAt,
@@ -141,7 +141,7 @@ func toItemResponses(items []application.ItemView) []itemResponse {
 }
 
 func toContentResponse(v application.ContentView) contentResponse {
-	return contentResponse{Title: v.Title, Body: v.Body, Items: toItemResponses(v.Items)}
+	return contentResponse{Title: v.Title, Body: v.Body, Layout: v.Layout, Items: toItemResponses(v.Items)}
 }
 
 func toVersionResponse(v application.VersionView) versionResponse {
@@ -151,7 +151,6 @@ func toVersionResponse(v application.VersionView) versionResponse {
 func toSectionResponse(v application.SectionView) sectionResponse {
 	resp := sectionResponse{
 		ID:                    v.ID,
-		Kind:                  v.Kind,
 		Draft:                 toContentResponse(v.Draft),
 		HasUnpublishedChanges: v.HasUnpublishedChanges,
 		Revision:              v.Revision,

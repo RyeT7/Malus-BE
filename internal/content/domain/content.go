@@ -20,10 +20,24 @@ const (
 	maxSourceLabel  = 200
 	maxSourceURL    = 2048
 	maxAttachments  = 10
-
-	strengthsAndWeaknessesCount = 3
-	minWorkplanSemesters        = 2
 )
+
+type Layout string
+
+const (
+	LayoutList     Layout = "list"
+	LayoutFacts    Layout = "facts"
+	LayoutTimeline Layout = "timeline"
+)
+
+var layouts = []Layout{LayoutList, LayoutFacts, LayoutTimeline}
+
+func ParseLayout(s string) (Layout, error) {
+	if l := Layout(strings.TrimSpace(s)); slices.Contains(layouts, l) {
+		return l, nil
+	}
+	return "", kernel.Invalid("layout must be one of list, facts or timeline")
+}
 
 type Source struct {
 	Label string
@@ -91,12 +105,13 @@ func normalizeAttachments(index int, ids []kernel.ID) ([]kernel.ID, error) {
 }
 
 type Content struct {
-	Title string
-	Body  string
-	Items []Item
+	Title  string
+	Body   string
+	Layout Layout
+	Items  []Item
 }
 
-func NewContent(title, body string, items []Item) (Content, error) {
+func NewContent(title, body string, layout Layout, items []Item) (Content, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return Content{}, kernel.Invalid("title is required")
@@ -106,6 +121,9 @@ func NewContent(title, body string, items []Item) (Content, error) {
 	}
 	if utf8.RuneCountInString(body) > maxBodyRunes {
 		return Content{}, kernel.Invalid("body exceeds %d characters", maxBodyRunes)
+	}
+	if !slices.Contains(layouts, layout) {
+		return Content{}, kernel.Invalid("layout must be one of list, facts or timeline")
 	}
 	if len(items) > maxItems {
 		return Content{}, kernel.Invalid("a section can have at most %d items", maxItems)
@@ -136,11 +154,11 @@ func NewContent(title, body string, items []Item) (Content, error) {
 		item.Sources, item.Attachments = sources, attachments
 		normalized = append(normalized, item)
 	}
-	return Content{Title: title, Body: body, Items: normalized}, nil
+	return Content{Title: title, Body: body, Layout: layout, Items: normalized}, nil
 }
 
 func (c Content) Equal(other Content) bool {
-	return c.Title == other.Title && c.Body == other.Body && slices.EqualFunc(c.Items, other.Items, Item.equal)
+	return c.Title == other.Title && c.Body == other.Body && c.Layout == other.Layout && slices.EqualFunc(c.Items, other.Items, Item.equal)
 }
 
 func (c Content) clone() Content {
@@ -162,45 +180,4 @@ func (c Content) AttachmentIDs() []kernel.ID {
 		}
 	}
 	return ids
-}
-
-func (k Kind) checkDraft(c Content) error {
-	if k == KindWorkplan {
-		return nil
-	}
-	for i, item := range c.Items {
-		if item.Semester != 0 {
-			return kernel.Invalid("item %d: only workplan items have a semester", i+1)
-		}
-	}
-	return nil
-}
-
-func (k Kind) checkPublishable(c Content) error {
-	switch k {
-	case KindStrengths, KindWeaknesses:
-		if len(c.Items) != strengthsAndWeaknessesCount {
-			return kernel.Conflict("%s needs exactly %d items to be published, has %d", k, strengthsAndWeaknessesCount, len(c.Items))
-		}
-	case KindWorkplan:
-		semesters := make(map[int]bool)
-		for i, item := range c.Items {
-			if item.Semester == 0 {
-				return kernel.Conflict("workplan item %d needs a semester to be published", i+1)
-			}
-			semesters[item.Semester] = true
-		}
-		if len(semesters) < minWorkplanSemesters {
-			return kernel.Conflict("workplan needs items in at least %d semesters to be published, has %d", minWorkplanSemesters, len(semesters))
-		}
-	case KindBiodata, KindInnovations, KindProposedChanges:
-		if len(c.Items) == 0 {
-			return kernel.Conflict("%s needs at least one item to be published", k)
-		}
-	case KindWhyMe:
-		if strings.TrimSpace(c.Body) == "" {
-			return kernel.Conflict("why_me needs a body to be published")
-		}
-	}
-	return nil
 }

@@ -20,6 +20,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/sessions", h.start)
 	mux.HandleFunc("GET /v1/sessions/{id}", h.get)
 	mux.HandleFunc("PUT /v1/sessions/{id}/slide", h.goTo)
+	mux.HandleFunc("POST /v1/sessions/{id}/end", h.end)
+	mux.HandleFunc("GET /v1/live/session", h.live)
+	mux.HandleFunc("GET /v1/live/connection", h.connection)
 }
 
 func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
@@ -58,4 +61,33 @@ func (h *Handler) goTo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, toSessionResponse(view))
+}
+
+func (h *Handler) end(w http.ResponseWriter, r *http.Request) {
+	view, err := h.svc.EndSession(r.Context(), kernel.ID(r.PathValue("id")))
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, toSessionResponse(view))
+}
+
+func (h *Handler) live(w http.ResponseWriter, r *http.Request) {
+	view, err := h.svc.LiveSession(r.Context())
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.JSON(w, http.StatusOK, toSessionResponse(view))
+}
+
+func (h *Handler) connection(w http.ResponseWriter, r *http.Request) {
+	conn, err := h.svc.Connection(r.Context())
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.JSON(w, http.StatusOK, connectionResponse{Kind: conn.Kind, URL: conn.URL})
 }

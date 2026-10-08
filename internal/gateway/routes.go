@@ -21,7 +21,9 @@ var Routes = []Route{
 	{"GET /v1/attachments/{id}/content", "content", Public},
 	{"GET /v1/sections", "content", Admin},
 	{"POST /v1/sections", "content", Admin},
+	{"PUT /v1/sections/order", "content", Admin},
 	{"GET /v1/sections/{id}", "content", Admin},
+	{"DELETE /v1/sections/{id}", "content", Admin},
 	{"PUT /v1/sections/{id}/draft", "content", Admin},
 	{"POST /v1/sections/{id}/publish", "content", Admin},
 	{"GET /v1/sections/{id}/versions", "content", Admin},
@@ -35,4 +37,8 @@ var Routes = []Route{
 	{"POST /v1/sessions", "realtime", Admin},
 	{"GET /v1/sessions/{id}", "realtime", Public},
 	{"PUT /v1/sessions/{id}/slide", "realtime", Admin},
+	{"POST /v1/sessions/{id}/end", "realtime", Admin},
+	{"GET /v1/live/session", "realtime", Public},
+	{"GET /v1/live/connection", "realtime", Public},
+	{"GET /v1/live/stream", "realtime", Public},
 }

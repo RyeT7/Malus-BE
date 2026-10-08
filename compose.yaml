@@ -162,6 +162,15 @@ services:
       args:
         SERVICE: realtime
     image: malus-be/realtime:local
+    environment:
+      <<: *env
+      COSMOS_ENDPOINT: http://cosmos:8081
+      COSMOS_KEY: *cosmos-emulator-key
+      COSMOS_DATABASE: malus
+      COSMOS_SESSIONS_CONTAINER: sessions
+    depends_on:
+      cosmos:
+        condition: service_started
 
   worker:
     <<: *service

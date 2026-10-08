@@ -29,3 +29,38 @@ func TestGoToRecordsOnlyRealChanges(t *testing.T) {
 		t.Fatalf("want ErrInvalid out of range, got %v", err)
 	}
 }
+
+func TestVersionIncreasesOnEveryRealChange(t *testing.T) {
+	now := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
+	s, _ := Start(5, now)
+	if s.Version() != 1 {
+		t.Fatalf("want version 1 after start, got %d", s.Version())
+	}
+	_ = s.GoTo(2, now)
+	_ = s.GoTo(2, now)
+	_ = s.GoTo(4, now)
+	if s.Version() != 3 {
+		t.Fatalf("want version 3 after two real changes, got %d", s.Version())
+	}
+}
+
+func TestEndedSessionRejectsSlideChanges(t *testing.T) {
+	now := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
+	s, _ := Start(5, now)
+	s.PullEvents()
+	s.End(now)
+	s.End(now)
+	if s.Active() || s.EndedAt() == nil {
+		t.Fatal("want ended session")
+	}
+	if events := s.PullEvents(); len(events) != 1 {
+		t.Fatalf("ending twice must record one SessionEnded, got %d events", len(events))
+	}
+	if err := s.GoTo(1, now); !errors.Is(err, kernel.ErrConflict) {
+		t.Fatalf("want ErrConflict after end, got %v", err)
+	}
+	r := Restore(s.Snapshot())
+	if r.Active() || r.Version() != s.Version() {
+		t.Fatal("snapshot must keep ended state and version")
+	}
+}

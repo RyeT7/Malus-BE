@@ -77,16 +77,16 @@ func TestSniffersRecogniseImages(t *testing.T) {
 
 func TestItemSourcesValidated(t *testing.T) {
 	ok := []Item{{Heading: "Plan", Sources: []Source{{Label: " Docs ", URL: " https://example.com/a "}}}}
-	c, err := NewContent("T", "", ok)
+	c, err := NewContent("T", "", LayoutList, ok)
 	if err != nil || c.Items[0].Sources[0] != (Source{Label: "Docs", URL: "https://example.com/a"}) {
 		t.Fatalf("want trimmed source, got %+v err=%v", c.Items, err)
 	}
 	for _, bad := range []string{"javascript:alert(1)", "ftp://x", "not a url", "https://"} {
-		if _, err := NewContent("T", "", []Item{{Heading: "P", Sources: []Source{{URL: bad}}}}); !errors.Is(err, kernel.ErrInvalid) {
+		if _, err := NewContent("T", "", LayoutList, []Item{{Heading: "P", Sources: []Source{{URL: bad}}}}); !errors.Is(err, kernel.ErrInvalid) {
 			t.Errorf("%q: want ErrInvalid, got %v", bad, err)
 		}
 	}
-	if _, err := NewContent("T", "", []Item{{Heading: "P", Attachments: []kernel.ID{"a", "a"}}}); !errors.Is(err, kernel.ErrInvalid) {
+	if _, err := NewContent("T", "", LayoutList, []Item{{Heading: "P", Attachments: []kernel.ID{"a", "a"}}}); !errors.Is(err, kernel.ErrInvalid) {
 		t.Fatalf("duplicate attachment: want ErrInvalid, got %v", err)
 	}
 }

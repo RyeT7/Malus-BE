@@ -56,28 +56,35 @@ func databaseName(dsn string) string {
 	return ""
 }
 
-func mustSection(t *testing.T, kind domain.Kind, title, body string, now time.Time, items ...domain.Item) *domain.Section {
+func mustSection(t *testing.T, layout domain.Layout, title, body string, now time.Time, items ...domain.Item) *domain.Section {
 	t.Helper()
-	content, err := domain.NewContent(title, body, items)
+	content, err := domain.NewContent(title, body, layout, items)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := domain.NewSection(kind, content, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
+	return domain.NewSection(content, now)
 }
 
 func mustEdit(t *testing.T, s *domain.Section, title, body string, now time.Time, items ...domain.Item) {
 	t.Helper()
-	content, err := domain.NewContent(title, body, items)
+	content, err := domain.NewContent(title, body, s.Draft().Layout, items)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EditDraft(content, now); err != nil {
+	s.EditDraft(content, now)
+}
+
+func titles(t *testing.T, repo *SectionRepository) []string {
+	t.Helper()
+	all, err := repo.List(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
+	out := make([]string, len(all))
+	for i, s := range all {
+		out[i] = s.Draft().Title
+	}
+	return out
 }
 
 func TestSectionRepositoryRoundTrip(t *testing.T) {
@@ -86,7 +93,7 @@ func TestSectionRepositoryRoundTrip(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	name := domain.Item{Heading: "Name", Detail: "Ryuu"}
-	s := mustSection(t, domain.KindBiodata, "About me", "first", now, name)
+	s := mustSection(t, domain.LayoutFacts, "About me", "first", now, name)
 	if _, err := s.Publish(now); err != nil {
 		t.Fatal(err)
 	}
@@ -107,9 +114,12 @@ func TestSectionRepositoryRoundTrip(t *testing.T) {
 		t.Fatalf("update: %v", err)
 	}
 
-	got, err := repo.FindByKind(ctx, domain.KindBiodata)
+	got, err := repo.Get(ctx, s.ID())
 	if err != nil {
-		t.Fatalf("find by kind: %v", err)
+		t.Fatalf("reload: %v", err)
+	}
+	if got.Draft().Layout != domain.LayoutFacts || got.Versions()[0].Content.Layout != domain.LayoutFacts {
+		t.Fatalf("layout not persisted: draft=%q", got.Draft().Layout)
 	}
 	v := got.Versions()
 	if len(v) != 2 || v[1].Content.Body != "second" || got.Draft().Body != "second" {
@@ -128,12 +138,12 @@ func TestSectionRepositoryRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSectionRepositoryPersistsWorkplanSemesters(t *testing.T) {
+func TestSectionRepositoryPersistsSemesters(t *testing.T) {
 	repo := NewSectionRepository(openTestDB(t))
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	s := mustSection(t, domain.KindWorkplan, "Workplan", "", now,
+	s := mustSection(t, domain.LayoutTimeline, "Workplan", "", now,
 		domain.Item{Heading: "Onboarding", Detail: "Meet the team", Semester: 1},
 		domain.Item{Heading: "Review", Semester: 2},
 	)
@@ -155,11 +165,12 @@ func TestSectionRepositoryDetectsConcurrentUpdate(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repo.Save(ctx, mustSection(t, domain.KindWorkplan, "Plan", "v1", now)); err != nil {
+	plan := mustSection(t, domain.LayoutList, "Plan", "v1", now)
+	if err := repo.Save(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
-	first, _ := repo.FindByKind(ctx, domain.KindWorkplan)
-	second, _ := repo.FindByKind(ctx, domain.KindWorkplan)
+	first, _ := repo.Get(ctx, plan.ID())
+	second, _ := repo.Get(ctx, plan.ID())
 
 	mustEdit(t, first, "Plan", "from tab A", now)
 	if err := repo.Save(ctx, first); err != nil {
@@ -172,15 +183,60 @@ func TestSectionRepositoryDetectsConcurrentUpdate(t *testing.T) {
 	}
 }
 
-func TestSectionRepositoryEnforcesUniqueKind(t *testing.T) {
+func TestSectionRepositoryOrdersDeletesAndReorders(t *testing.T) {
 	repo := NewSectionRepository(openTestDB(t))
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if err := repo.Save(ctx, mustSection(t, domain.KindWhyMe, "Why", "x", now)); err != nil {
+	var ids []kernel.ID
+	for _, title := range []string{"A", "B", "C", "D"} {
+		s := mustSection(t, domain.LayoutList, title, "", now)
+		if title == "B" {
+			if _, err := s.Publish(now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := repo.Save(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, s.ID())
+	}
+	if got := strings.Join(titles(t, repo), ""); got != "ABCD" {
+		t.Fatalf("want sections in creation order, got %s", got)
+	}
+
+	if err := repo.Reorder(ctx, []kernel.ID{ids[3], ids[1], ids[0], ids[2]}); err != nil {
+		t.Fatalf("reorder: %v", err)
+	}
+	if got := strings.Join(titles(t, repo), ""); got != "DBAC" {
+		t.Fatalf("want DBAC after reorder, got %s", got)
+	}
+	if err := repo.Reorder(ctx, ids[:3]); !errors.Is(err, kernel.ErrConflict) {
+		t.Fatalf("reorder with a missing section: want ErrConflict, got %v", err)
+	}
+
+	b, _ := repo.Get(ctx, ids[1])
+	stale, _ := repo.Get(ctx, ids[1])
+	mustEdit(t, b, "B", "edited", now)
+	if err := repo.Save(ctx, b); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Save(ctx, mustSection(t, domain.KindWhyMe, "Why", "x", now)); !errors.Is(err, kernel.ErrConflict) {
-		t.Fatalf("want ErrConflict for duplicate kind, got %v", err)
+	if err := repo.Delete(ctx, stale); !errors.Is(err, kernel.ErrConcurrentUpdate) {
+		t.Fatalf("delete with stale revision: want ErrConcurrentUpdate, got %v", err)
+	}
+	current, _ := repo.Get(ctx, ids[1])
+	if err := repo.Delete(ctx, current); err != nil {
+		t.Fatalf("delete published section: %v", err)
+	}
+	if _, err := repo.Get(ctx, ids[1]); !errors.Is(err, kernel.ErrNotFound) {
+		t.Fatalf("want ErrNotFound after delete, got %v", err)
+	}
+
+	e := mustSection(t, domain.LayoutList, "E", "", now)
+	if err := repo.Save(ctx, e); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(titles(t, repo), ""); got != "DACE" {
+		t.Fatalf("want a new section appended last, got %s", got)
 	}
 }

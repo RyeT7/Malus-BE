@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"malus-be/internal/platform/httpx"
+	"malus-be/internal/platform/telemetry"
 )
 
 const maxBodyBytes = 1 << 20
@@ -24,7 +25,7 @@ func newProxy(name string, target *url.URL, log *slog.Logger) http.Handler {
 	}
 
 	proxy := &httputil.ReverseProxy{
-		Transport: transport,
+		Transport: telemetry.Transport(transport),
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			pr.SetXForwarded()

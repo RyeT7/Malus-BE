@@ -13,6 +13,7 @@ import (
 	"malus-be/internal/platform/config"
 	"malus-be/internal/platform/httpx"
 	"malus-be/internal/platform/logging"
+	"malus-be/internal/platform/telemetry"
 )
 
 type Runtime struct {
@@ -69,6 +70,17 @@ func Run(name string, setup Setup, opts ...Option) {
 		return
 	}
 
+	shutdown, err := telemetry.Start(ctx, name)
+	if err != nil {
+		log.Warn("tracing disabled", "error", err)
+	} else {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = shutdown(ctx)
+		}()
+	}
+
 	mux := http.NewServeMux()
 	checks, err := setup(ctx, Runtime{Config: cfg, Log: log, Mux: mux})
 	if err != nil {
@@ -77,7 +89,7 @@ func Run(name string, setup Setup, opts ...Option) {
 	}
 	httpx.RegisterHealth(mux, checks...)
 
-	handler := httpx.Chain(mux, httpx.RequestID, httpx.Recover(log), httpx.AccessLog(log))
+	handler := telemetry.Handler(httpx.Chain(mux, httpx.RequestID, httpx.Recover(log), httpx.AccessLog(log)), name)
 	if err := httpx.Serve(ctx, cfg.Addr, handler, log); err != nil {
 		log.Error("server stopped", "error", err)
 		os.Exit(1)
